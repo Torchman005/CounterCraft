@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "dev.countercraft.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "client": ["ClientTickMixin", "CameraMixin", "GameRendererMixin"],
+  "injectors": {"defaultRequire": 1}
+}

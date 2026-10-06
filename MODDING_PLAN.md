@@ -17,6 +17,6 @@ follow a CS2 camera. Existing OptiFine worlds remain untouched.
 ## Milestones
 
 1. `bridge/protocol.py` defines camera messages and coordinate transforms; diagnostic TCP handshake and validation have tests. It is not a renderer or relay.
-2. Add a Fabric 1.20.1 adapter that emits camera and frame metadata over localhost.
+2. Fabric 1.20.1 camera lab: receive host poses over localhost, apply render-only camera/FOV overrides, and restore the vanilla view on timeout. Colour/depth export is a subsequent stage.
 3. Add the CS2 offline host adapter and render one test cube with depth ordering.
 4. Add block/entity/event forwarding, then package a launcher and backup/restore flow.

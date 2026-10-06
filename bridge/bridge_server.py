@@ -1,7 +1,7 @@
 """Local test server for the CounterCraft bridge.
 
-It is intentionally harmless: it only listens on loopback and logs protocol
-messages. The real CS2 adapter will replace this endpoint once a renderer route is
+It only listens on loopback and acknowledges validated protocol messages.
+The real CS2 adapter will replace this endpoint once a renderer route is
 selected.
 """
 

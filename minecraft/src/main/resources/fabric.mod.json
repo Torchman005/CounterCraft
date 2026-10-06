@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "countercraft",
+  "version": "${version}",
+  "name": "CounterCraft Camera Lab",
+  "description": "Offline camera bridge prototype for Minecraft 1.20.1. No CS2 renderer yet.",
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {"client": ["dev.countercraft.BridgeClient"]},
+  "mixins": ["countercraft.mixins.json"],
+  "depends": {"fabricloader": ">=0.19.5", "minecraft": "1.20.1", "java": ">=17"},
+  "breaks": {"optifabric": "*", "optifine": "*"}
+}

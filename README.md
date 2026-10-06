@@ -1,7 +1,9 @@
 # CounterCraft
 目标：在 **CS2 本机离线模式**中接入真实 Minecraft Java 模拟，包括方块、合成、生物等系统。
 
-**当前状态：前期原型，不能在 CS2 中玩 Minecraft。** 已实现独立的 Python 协议诊断端点、坐标转换、环境检查和离线启动预览；Minecraft 模组、CS2 适配器和画面合成尚未实现。这里没有可安装的游戏模组包。
+**当前状态：前期原型，不能在 CS2 中玩 Minecraft。** 已实现 Python 协议诊断端点、坐标转换、环境检查和离线启动预览，并新增 Fabric 1.20.1 相机接收模组。CS2 适配器和画面合成尚未实现。
+
+插件 `universal-modder 0.2.0` 已安装启用。Python 的 8 项测试、Java 网络与状态核心的 5 项测试通过；完整 Fabric 构建卡在依赖下载，尚未生成可安装 jar，也未进行游戏内验证。
 
 ## 本地检查
 
@@ -32,6 +34,6 @@ python -m bridge.bridge_server
 
 `./game/launch-offline.ps1 -Launch` 才会启动原版 CS2，参数为 `-insecure -console +sv_lan 1 +map de_dust2`。已有 CS2 进程时会拒绝启动。该脚本不安装 CounterCraft，启动参数也不构成网络防火墙；不要在开发会话中连接官方服务器。
 
-现有 `1.20.1-OptiFine_I6` 实例和存档未修改。计划用独立的 Fabric 1.20.1 实例开发；尚未建立实例，也未验证 OptiFine 混用。
+现有 `1.20.1-OptiFine_I6` 实例和存档未修改。相机模组使用独立的 Fabric 1.20.1 开发实例，不支持 OptiFine 混用。构建、启动和本机相机测试见 [Minecraft 相机实验说明](minecraft/README.md)。
 
 详见 [MODDING_PLAN.md](MODDING_PLAN.md) 和 [MODLOG.md](MODLOG.md)。插件安装可审阅 `scripts/install-plugin.ps1` 后在普通 PowerShell 中运行。插件安装与游戏适配是两个独立步骤。

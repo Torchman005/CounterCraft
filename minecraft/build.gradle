@@ -1,0 +1,38 @@
+plugins {
+    id 'fabric-loom' version '1.10.5'
+}
+
+group = 'dev.countercraft'
+version = '0.1.0'
+
+repositories { mavenCentral() }
+
+dependencies {
+    minecraft 'com.mojang:minecraft:1.20.1'
+    mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
+    modImplementation 'net.fabricmc:fabric-loader:0.19.5'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+loom {
+    runs {
+        client {
+            runDir 'run'
+            vmArg '-Dcountercraft.enabled=true'
+            programArgs '--width', '1280', '--height', '720'
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach { options.release = 17 }
+tasks.withType(Test).configureEach { useJUnitPlatform() }
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    withSourcesJar()
+}
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand version: project.version }
+}

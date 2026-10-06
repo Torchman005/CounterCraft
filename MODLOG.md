@@ -81,6 +81,31 @@ launch, in-game test, rendering bridge, or complete port has been performed.
   recorded in CONTRIBUTING.md. The first milestone is diagnostic bridge groundwork,
   not a playable Minecraft-to-CS2 port.
 
+## Execution restored and Minecraft camera lab (2026-10-06)
+
+- `scripts/install-plugin.ps1` completed successfully. Codex reported
+  `universal-modder@universal-modder` 0.2.0 installed and enabled.
+- All eight Python tests passed with loopback access, including the two socket tests.
+  PowerShell execution policy alone does not grant the sandbox network access;
+  the successful runs used the separately approved execution path.
+- Added a Fabric 1.20.1 camera receiver and a Python test host. This is render-only
+  camera control, not full game simulation integration or CS2 composition.
+- Used pinned Loom 1.10.5, Yarn 1.20.1+build.10, Loader 0.19.5, Java 17 bytecode.
+  Existing Gradle 8.12.1 was incomplete (missing Kotlin compiler jar). Switched to
+  Gradle 8.14 with JDK 21 and a project-local cache to isolate build state.
+- New Java tests cover expiry, world switch, invalid poses, fragmented TCP,
+  acknowledgement, release, duplicate frames, reconnect and read bounds.
+- All five Java core tests passed, including real loopback sockets, using local
+  JUnit 5.11.4 and Gson 2.10.1 with `javac --release 17`. This verifies the network
+  and state classes independently of Minecraft; it does not verify Mixin injection.
+- Full Gradle builds repeatedly stalled downloading
+  `https://maven.fabricmc.net/net/fabricmc/mercury/0.4.2/mercury-0.4.2.jar`.
+  The stalled builds were interrupted. Separate bounded HEAD/download diagnostics
+  did not execute because automatic approval timed out. Do not infer a server outage
+  from these unexecuted diagnostics. No installable jar exists yet.
+- No game launch, input automation, loader installation into a game directory,
+  profile change, or save modification took place in this stage.
+
 ## Sources
 
 - https://github.com/rehan-remade/universal-modder
