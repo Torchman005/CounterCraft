@@ -3,7 +3,9 @@
 This is a verified independent renderer plus a **ReShade upload/diagnostic inset
 verified in actual offline CS2**. It is not a playable Minecraft port or verified
 CS2 scene compositor. The original OptiFine instance is not used. The temporary
-game-folder loader was restored after testing.
+game-folder loader was restored after testing on 2026-10-07. The opt-in host-depth
+observer added on 2026-10-08 is compiled/offline-tested and still awaits actual
+CS2 verification after the user's reinstall.
 
 ## Build
 
@@ -19,7 +21,7 @@ Headers are pinned to nlohmann/json 3.12.0 and ReShade v6.8.0 commit
 `18deaa52de0c425a78b329e9cb3c497281cd00ec`, with SHA256 checks. The scripts do not
 download/install a runtime loader or write game files. Outputs stay under `.local`.
 
-CTest runs four suites:
+CTest runs seven suites:
 
 - Binary protocol: seven groups for layout, bounds, UUID, sequence, CRC, JSON,
   epoch, camera vectors and finite depth.
@@ -32,6 +34,15 @@ CTest runs four suites:
   distinct clock origins, CRC/depth rejection, partial packet, wrong session,
   duplicate sequence, stale/future frame, pause refusal, epoch/control loss,
   partial-read cancellation and mailbox expiry.
+- Projection math: six groups covering hand-derived finite/infinite endpoints,
+  normal/reversed depth, left/right eye space, jitter, FP32 and invalid inputs.
+- Bounded depth inventory: nine groups for resource lifetime/reuse, effect
+  exclusion, resize, multiple devices, indirect/subresource counts, capacity and
+  counter saturation. This replays synthetic events without any game.
+- Projection GPU: hardware D3D11, eight projection modes at two resolutions and
+  unit scales 0.5/1/32 (48 cases). Checks full-image near/far occlusion, invalid
+  host depth, host/guest sky and exact no-frame pass-through. These are synthetic
+  textures, not CS2 captures.
 
 ## Real Minecraft oracle
 
@@ -149,17 +160,36 @@ a failed partial install stays `Prepared` for inspection. Restore removes only
 the exact new hash-matched loader, retaining evidence. A modified target or
 manipulated target path causes refusal. Restore before normal CS2 use.
 
-The actual restore was verified against the universal-modder snapshot: no added,
-removed or changed files. The install/restore fixture suite also passed five
-tests without launching a game:
+The 2026-10-07 restore was verified against the universal-modder snapshot: no
+added, removed or changed files. The fixture suite currently passes ten tests covering
+install/restore, opt-in launch previews and preparation with a missing game.
+It never launches a game:
 
 ```powershell
 python scripts/test-cs2-loader.py --loader .local/reshade-runtime/ReShade64.dll -v
 ```
 
+## Host depth preparation without a game install
+
+The new observer is enabled only with `launch-cs2-lab.ps1 -HostProbe`; it is
+disabled in the normal upload diagnostic session. It records bounded, non-owning
+depth-resource metadata and candidate draw/clear counts. It never reads pixels
+or camera constant buffers, chooses a resource, or enables world composition.
+
+```powershell
+./scripts/prepare-cs2-lab.ps1 -AllowMissingGame -Destination .local/cs2-host-probe-candidate
+```
+
+This prepares only local files even when `cs2.exe` is absent. After reinstall,
+refresh the plan and make a new backup of that install before the next approved
+offline session. Do not reuse the pre-reinstall snapshot as current-state evidence.
+The [host depth note](../../docs/host-depth-probe.md) explains the telemetry,
+projection contract, explicit unit conversion and remaining actual-game oracles.
+
 ## Still to prove in the actual offline game
 
-Resize/world-switch/resource lifetime, frame callback timing, the actual host
+New host-observer callback coverage/overhead, resize/world-switch/resource lifetime,
+frame callback timing, the actual host
 camera/projection and depth resource/convention,
 then an in-world cube with correct occlusion. Gameplay input, collision, chunk and
 event routing and GPU shared transport are later stages. No server plugin supplies

@@ -41,8 +41,8 @@ follow a CS2 camera. Existing OptiFine worlds remain untouched.
   cleanup was later verified in the offline CS2 session; resize/world switch
   lifecycle remains open.
 - Native lab checkpoint: isolated D3D11 colour/depth composition and Windows
-  loopback receiver verified. Four CTest suites pass, including nine native socket
-  tests and actual DLL refusal in a non-CS2 process. Hardware MC test received/
+  loopback receiver verified. Seven CTest suites currently pass, including nine
+  native socket tests and actual DLL refusal in a non-CS2 process. Hardware MC test received/
   uploaded 180 frames in 10 seconds, age P95 112.33ms. This uses known eye-space
   cube geometry, not the CS2 camera/depth.
 - ReShade 6.8.0 actual offline CS2 check passed: D3D11 callbacks, own-texture
@@ -53,15 +53,26 @@ follow a CS2 camera. Existing OptiFine worlds remain untouched.
   remains unverified. GPU shared transport and gameplay routing are unimplemented.
 - Approved temporary installation created only dxgi.dll; the official process
   base-path override isolated config/log/effects/cache. Installation and restore
-  fixtures pass five tests. After graceful exit the loader was removed and the
-  game directory exactly matched its pre-install backup. A teardown reference
+  workflow was verified on 2026-10-07. Ten fixtures currently cover install/
+  restore, launch previews and preparation without CS2. After that game's graceful
+  exit the loader was removed and the directory matched its pre-install backup.
+  A teardown reference
   warning also appeared with only ReShade loaded; attribution/lifetime remains open.
+- 2026-10-08 host-depth preparation checkpoint: fixed-capacity, opt-in ReShade
+  metadata observation, with no depth/camera readback or resource selection. Pure
+  event replay covers lifetime/reuse, effect exclusion and bounded accounting.
+  Explicit D3D perspective depth inversion supports normal/reversed Z, left/right
+  eye space and finite/infinite far. Hardware GPU oracle passes 48 projection/
+  resolution/unit combinations. The new callbacks remain unverified in CS2.
+- User is reinstalling CS2 after accidental deletion. Only independent lab tests
+  and repository-local candidate preparation ran; no game-folder writes/launches.
+  After download completes, recheck build/location and make a fresh backup.
 
 ## Next client slice
 
 Measure the actual offline CS2 camera matrices/depth and prove an in-world cube
 with correct occlusion. Also test resize/world-switch and resource lifetime.
 Use the reviewed temporary loader workflow and backup/restore scripts for each
-test session; the loader is currently restored.
+test session after the reinstall is complete and its new state is reviewed.
 The independent cube test and ReShade/GTA reference are not a verified CS2 adapter.
 GPU sharing, input/event routing and player/chunk/collision sync remain later work.

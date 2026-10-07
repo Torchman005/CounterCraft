@@ -10,7 +10,7 @@ official matchmaking.
 ## Native checkpoint
 
 The [native lab](native/README.md) validates Windows loopback reception and
-isolated D3D11 depth composition, with four passing CTest suites. The ReShade
+isolated D3D11 depth composition, with seven passing CTest suites. The ReShade
 upload/diagnostic-inset add-on was also verified in actual offline CS2 on
 2026-10-07: D3D11 callbacks, own-texture uploads and FX compilation succeeded.
 Live Minecraft terrain/sky appeared in an inset over local Dust2. Pausing the
@@ -25,11 +25,19 @@ inset and independent GPU oracle do not establish CS2 world composition.
 
 The approved temporary install created only `game/bin/win64/dxgi.dll`. Official
 `RESHADE_BASE_PATH_OVERRIDE` kept config/effects/logs/cache outside the game via
-the launched process environment. The loader was restored after graceful exits;
-the game directory matches its pre-install backup. A D3D11 reference-count
+the launched process environment. The loader was restored after graceful exits
+on 2026-10-07; at that point the directory matched its pre-install backup.
+A D3D11 reference-count
 warning also occurred with only ReShade loaded, so leak attribution remains open.
-Five install/restore fixture tests pass. See the native README for the reversible
-PowerShell 7.4+ workflow.
+Ten install/restore/preparation/launch-preview fixture tests pass. See the native
+README for the reversible PowerShell 7.4+ workflow.
+
+2026-10-08 adds an opt-in read-only host-depth observer and explicit projection/
+unit conversion validated on standalone hardware D3D11 (48 occlusion cases).
+Synthetic event replay validates its bounded lifetime accounting. No CS2 launch
+or game-folder writes occurred during the user's reinstall; actual new-observer
+callbacks still need verification. [Host depth preparation](../docs/host-depth-probe.md)
+works with a missing game and explains the limits of candidate telemetry.
 
 ## Next client slice
 

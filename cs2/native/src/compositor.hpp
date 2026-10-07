@@ -1,5 +1,6 @@
 #pragma once
 #include "frame.hpp"
+#include "projection.hpp"
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <filesystem>
@@ -21,6 +22,10 @@ public:
     void draw(ID3D11ShaderResourceView* host_color, ID3D11ShaderResourceView* host_depth,
               ID3D11RenderTargetView* output, int width, int height,
               float host_near, float host_far, bool host_reversed, bool guest_active = true);
+    void draw(ID3D11ShaderResourceView* host_color, ID3D11ShaderResourceView* host_depth,
+              ID3D11RenderTargetView* output, int width, int height,
+              const ProjectionDepth& host_projection, bool guest_active = true,
+              float host_units_per_guest = 1);
     void clear();
 private:
     ComPtr<ID3D11Device> device_;

@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$StateFile,
     [ValidatePattern('^[A-Za-z0-9_]+$')][string]$Map='de_dust2',
+    [switch]$HostProbe,
     [switch]$Launch
 )
 $ErrorActionPreference = 'Stop'
@@ -12,6 +13,7 @@ $cs2 = Join-Path $gameDirectory 'cs2.exe'
 $candidate = [IO.Path]::GetFullPath($state.Candidate)
 if ((Get-FileHash -LiteralPath $state.Target -Algorithm SHA256).Hash.ToLowerInvariant() -ne $state.LoaderSha256) { throw 'Installed loader changed.' }
 $launchArguments = @('-insecure','-countercraft-lab','-countercraft-preview','-console','+sv_lan','1','+map',$Map)
+if ($HostProbe) { $launchArguments += '-countercraft-host-probe' }
 if (-not $Launch) {
     [pscustomobject]@{ Mode='Preview'; Executable=$cs2; Arguments=$launchArguments; Environment=@{RESHADE_BASE_PATH_OVERRIDE=$candidate} }
     return

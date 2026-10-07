@@ -1,6 +1,7 @@
 // Diagnostic ReShade candidate. It does not read CS2 memory, camera or scene depth.
 #include "receiver.hpp"
 #include "offline_guard.hpp"
+#include "host_probe.hpp"
 #include <reshade.hpp>
 #include <shellapi.h>
 #include <json.hpp>
@@ -52,6 +53,7 @@ struct RuntimeTextures {
 
 struct AddonState {
     cc::Receiver receiver;
+    cc::HostProbe host_probe;
     bool preview{};
     std::mutex runtimes_mutex, report_mutex;
     std::unordered_map<api::effect_runtime*,RuntimeTextures> runtimes;
@@ -61,7 +63,7 @@ struct AddonState {
     bool ending{};
     std::thread reporter;
 
-    explicit AddonState(bool p) : preview(p) {}
+    AddonState(bool p, bool probe) : host_probe(probe), preview(p) {}
     void report_loop() {
         try {
             std::unique_lock lock(report_mutex);
@@ -73,7 +75,7 @@ struct AddonState {
                     {"size",{width.load(),height.load()}},{"uploads",uploads.load()},
                     {"resourceFailures",failures.load()},{"received",status.received},
                     {"connected",status.connected},{"failure",status.failure},
-                    {"hostCameraDepthVerified",false}}.dump();
+                    {"hostCameraDepthVerified",false},{"hostDepthProbe",host_probe.report()}}.dump();
                 if (message != last) {
                     // Disk logging/JSON encoding happens here, never in a render callback.
                     reshade::log::message(reshade::log::level::info,message.c_str()); last = message;
@@ -190,11 +192,13 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon, HMODULE reshade_m
     if (!cc::offline_lab_allowed(executable,arguments)) return false;
     if (!reshade::register_addon(addon,reshade_module)) return false;
     try {
-        state = new AddonState(cc::has_argument(arguments,L"-countercraft-preview"));
+        state = new AddonState(cc::has_argument(arguments,L"-countercraft-preview"),
+            cc::has_argument(arguments,L"-countercraft-host-probe"));
         reshade::register_event<reshade::addon_event::init_effect_runtime>(init_runtime);
         reshade::register_event<reshade::addon_event::destroy_effect_runtime>(destroy_runtime);
         reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(reload_effects);
         reshade::register_event<reshade::addon_event::reshade_begin_effects>(begin_effects);
+        state->host_probe.install();
         state->reporter = std::thread(&AddonState::report_loop,state);
         reshade::log::message(reshade::log::level::info,"CounterCraft upload candidate: offline guard passed. Host camera/depth unverified.");
         return true;
@@ -206,6 +210,7 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon, HMODULE reshade_m
 
 extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon, HMODULE reshade_module) {
     if (!state) return;
+    state->host_probe.uninstall();
     reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(begin_effects);
     reshade::unregister_event<reshade::addon_event::reshade_reloaded_effects>(reload_effects);
     reshade::unregister_event<reshade::addon_event::init_effect_runtime>(init_runtime);

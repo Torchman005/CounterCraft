@@ -1,7 +1,8 @@
 param(
     [string]$Cs2Root = 'D:\steam\steamapps\common\Counter-Strike Global Offensive',
     [string]$NativeBuild,
-    [string]$Destination
+    [string]$Destination,
+    [switch]$AllowMissingGame
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
@@ -20,7 +21,9 @@ if (($Destination.TrimEnd('\') + '\').StartsWith($gameRoot, [StringComparison]::
 }
 $addon = Join-Path $NativeBuild 'CounterCraftProbe.addon64'
 $cs2 = Join-Path $gameDirectory 'cs2.exe'
-foreach ($file in @($addon, $cs2)) { if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing file: $file" } }
+if (-not (Test-Path -LiteralPath $addon -PathType Leaf)) { throw "Missing file: $addon" }
+$gameExecutablePresent = Test-Path -LiteralPath $cs2 -PathType Leaf
+if (-not $gameExecutablePresent -and -not $AllowMissingGame) { throw "Missing file: $cs2 (use -AllowMissingGame for preparation only)" }
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 Copy-Item -LiteralPath $addon -Destination (Join-Path $Destination 'CounterCraftProbe.addon64') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'cs2\reshade\CounterCraftProbe.fx') -Destination $Destination -Force
@@ -53,8 +56,10 @@ $targets = foreach ($name in @('dxgi.dll')) {
 $plan = [pscustomobject]@{
     Mode = 'PreviewOnly'
     GameFilesWritten = $false
+    GameExecutablePresent = $gameExecutablePresent
     Executable = $cs2
     Arguments = @('-insecure', '-countercraft-lab', '-countercraft-preview', '-console', '+sv_lan', '1', '+map', 'de_dust2')
+    OptionalHostProbeArgument = '-countercraft-host-probe'
     Environment = @{ RESHADE_BASE_PATH_OVERRIDE = $Destination }
     CandidateAddon = Join-Path $Destination 'CounterCraftProbe.addon64'
     CandidateSha256 = (Get-FileHash -LiteralPath (Join-Path $Destination 'CounterCraftProbe.addon64') -Algorithm SHA256).Hash
@@ -62,7 +67,7 @@ $plan = [pscustomobject]@{
     BackupDirectory = Join-Path $projectRoot '.local\cs2-loader-backup'
     InstallPolicy = 'Requires specific approval. Stop CS2; snapshot target states; refuse an existing loader/config unless reviewed; verify official loader provenance before copying.'
     RestorePolicy = 'Stop CS2; remove only the newly installed, hash-matched dxgi.dll. Keep backup/evidence. Restore before normal CS2 use. Config/logs/cache stay outside the game via the official per-process base-path override.'
-    VerifiedScope = 'Native protocol/socket/GPU oracle, addon refusal and real offline CS2 D3D11 callbacks, own-texture upload, FX compilation and MC pause fallback. Host camera/depth/world fusion, resize and gameplay remain unverified. See MODLOG for build-specific evidence.'
+    VerifiedScope = 'Offline protocol/socket/GPU/projection/resource-inventory oracles and addon refusal. Upload/FX/pause were verified in CS2 at d1be2d9; the new opt-in host observer requires fresh real-game verification after reinstall. Host camera/depth/world fusion and gameplay remain unverified.'
 }
 $plan | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $Destination 'install-plan.json') -Encoding utf8
 $plan | ConvertTo-Json -Depth 6

@@ -2,6 +2,54 @@
 
 Started: 2026-10-06
 
+## Host depth reconnaissance without CS2 (2026-10-08)
+
+- User reported accidentally deleting CS2 and is downloading it again. Continue
+  only work that needs no CS2 launch; do not install a loader or change/download
+  game files. Starting from pushed checkpoint d1be2d9.
+- Route: bounded read-only ReShade depth-resource observation plus independently
+  validated D3D projection-depth math. Resource dimensions/draw counts/clears are
+  candidate evidence, never automatic camera/depth selection. No host pixel or
+  constant-buffer readback, COM ownership, retail offsets or memory scans.
+- Keep observation opt-in under the existing exact offline flags. ReShade event
+  signatures and native D3D11 context lifetime are read from pinned 6.8.0 headers.
+  Test ordinary/reversed finite/infinite projection and known GPU geometry in the
+  standalone lab, then verify the new callbacks in actual CS2 after reinstall.
+- Implemented 128-resource/64-binding/8-device fixed metadata storage, per-lifetime
+  IDs, per-device effect intervals, no-frame/effect exclusion, saturated counters
+  and eight-candidate report bounds. New host_probe callbacks retain no COM object,
+  skip native deferred contexts and always return false for command interception.
+  Render callbacks use try_lock; reporter sorts/encodes the copy off-thread.
+  Missed/deferred/overflow evidence is explicit. IDs never authorize resource use.
+- Added ProjectionDepth with an explicit D3D [0,1], column-major, independent
+  perspective contract. Supports ordinary/reversed finite/infinite Z and both eye
+  handedness conventions; canonical-layout checks refuse invalid matrices. This
+  does not discover or identify CS2 camera constants. Standalone compositor now
+  inverts projection coefficients and applies explicit host-to-guest unit scale.
+- Full native build passed without MSVC warnings/errors. Seven CTest suites pass
+  (8.14s): existing protocol/cube/guard/socket suites, six projection groups, nine
+  inventory replay groups and hardware projection GPU tests (48 cases). GPU tests
+  use synthetic host/guest planes at two resolutions and unit scales 0.5/1/32,
+  including sky/invalid depth/no-frame restoration; cs2Integrated remains false.
+- Ten PowerShell workflow fixtures passed (46.459s): existing exact install/
+  restore refusal checks plus host-probe opt-in preview, restored-state refusal,
+  map-argument refusal and preparation/missing-game path isolation. A first run
+  exposed a GBK decode error in the test subprocess; explicit UTF-8 decoding fixed
+  the fixture, and the final run had no background-thread errors. Eighteen Python
+  regressions passed (0.780s); Java/effect code was unchanged.
+- Prepared the actual new .local/cs2-host-probe-candidate with -AllowMissingGame.
+  Plan records GameExecutablePresent=false, GameFilesWritten=false and the
+  opt-in argument. No CS2 launch, loader install or download-directory mutation.
+  Updated build/preparation docs and docs/host-depth-probe.md separate synthetic
+  validation from upcoming actual callback/scene camera/depth verification.
+- All ten PowerShell scripts parsed, the fixture passed Python syntax validation
+  and staged whitespace checks passed. universal-modder publish check on the
+  73-file source-only index snapshot found zero failures and one existing journal
+  absolute-user-path warning. No binaries, SDK headers, game imagery, saves or
+  raw logs are staged. Game-content comparison was omitted while CS2 is absent/
+  reinstalling; the staged source inventory was checked explicitly for generated
+  binaries and assets. No CS2 process was running at the final check.
+
 ## Offline CS2 upload validation (2026-10-07)
 
 - User specifically approved installing/testing/restoring the offline loader.

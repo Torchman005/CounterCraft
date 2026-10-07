@@ -80,6 +80,76 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(other.read_bytes(), b'Own test marker')
         self.assertEqual(self.target.read_bytes(), LOADER.read_bytes())
 
+    def preview_launch(self, probe=False, map_name='de_dust2'):
+        # Only invoke the launcher's default preview; never pass -Launch.
+        def quote(value):
+            return "'" + str(value).replace("'", "''") + "'"
+        script = self.root / 'preview.ps1'
+        script.write_text("$ErrorActionPreference='Stop'\n& " +
+            quote(ROOT / 'scripts/launch-cs2-lab.ps1') + ' -StateFile ' + quote(self.state) +
+            ' -Map ' + quote(map_name) + (' -HostProbe' if probe else '') +
+            ' | ConvertTo-Json -Depth 5\n', encoding='utf8')
+        return subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File', str(script)],
+            capture_output=True, text=True, encoding='utf8', errors='replace', timeout=15)
+
+    def test_host_probe_is_opt_in_and_preview_only(self):
+        self.command('Install')
+        for enabled in (False, True):
+            result = self.preview_launch(probe=enabled)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            plan = json.loads(result.stdout)
+            self.assertEqual(plan['Mode'], 'Preview')
+            self.assertEqual('-countercraft-host-probe' in plan['Arguments'], enabled)
+            self.assertIn('-insecure', plan['Arguments'])
+            self.assertIn('-countercraft-lab', plan['Arguments'])
+            self.assertEqual(plan['Environment']['RESHADE_BASE_PATH_OVERRIDE'], str(self.candidate))
+        self.assertFalse(list(self.candidate.glob('cs2-console-*')))
+
+    def test_launch_preview_refuses_restored_state(self):
+        self.command('Install'); self.command('Restore')
+        result = self.preview_launch(probe=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Loader state must be Installed', result.stderr)
+
+    def test_launch_preview_refuses_map_arguments(self):
+        self.command('Install')
+        result = self.preview_launch(map_name='de_dust2;+connect')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Map', result.stderr)
+        self.assertFalse(list(self.candidate.glob('cs2-console-*')))
+
+    def test_prepare_missing_game_writes_only_candidate(self):
+        missing_game = self.root / 'absent-game'
+        native = self.root / 'native'; native.mkdir()
+        (native / 'CounterCraftProbe.addon64').write_bytes(b'Own nonexecuted preparation fixture')
+        destination = self.root / 'prepared'
+        args = [PWSH, '-NoLogo', '-NoProfile', '-File',
+            str(ROOT / 'scripts/prepare-cs2-lab.ps1'), '-Cs2Root', str(missing_game),
+            '-NativeBuild', str(native), '-Destination', str(destination)]
+        refused = subprocess.run(args, capture_output=True, text=True,
+            encoding='utf8', errors='replace', timeout=15)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertFalse(destination.exists())
+        prepared = subprocess.run([*args, '-AllowMissingGame'], capture_output=True,
+            text=True, encoding='utf8', errors='replace', timeout=15)
+        self.assertEqual(prepared.returncode, 0, prepared.stderr)
+        plan = json.loads(prepared.stdout)
+        self.assertFalse(plan['GameFilesWritten'])
+        self.assertFalse(plan['GameExecutablePresent'])
+        self.assertEqual(plan['OptionalHostProbeArgument'], '-countercraft-host-probe')
+        self.assertTrue((destination / 'CounterCraftProbe.addon64').is_file())
+        self.assertFalse(missing_game.exists())
+
+    def test_prepare_refuses_candidate_inside_missing_game(self):
+        missing_game = self.root / 'absent-game'
+        result = subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File',
+            str(ROOT / 'scripts/prepare-cs2-lab.ps1'), '-Cs2Root', str(missing_game),
+            '-Destination', str(missing_game / 'candidate'), '-AllowMissingGame'],
+            capture_output=True, text=True, encoding='utf8', errors='replace', timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('outside the game install', result.stderr)
+        self.assertFalse(missing_game.exists())
+
     # Fixtures remain under .local as failure evidence; no recursive cleanup/game changes.
 
 
