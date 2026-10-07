@@ -20,7 +20,13 @@ loom {
         client {
             runDir 'run'
             vmArg '-Dcountercraft.enabled=true'
+            if (providers.gradleProperty('countercraftBackground').getOrElse('false') == 'true') {
+                vmArg '-Dcountercraft.background=true'
+            }
             programArgs '--width', '1280', '--height', '720'
+            if (providers.gradleProperty('countercraftWorld').isPresent()) {
+                programArgs '--quickPlaySingleplayer', providers.gradleProperty('countercraftWorld').get()
+            }
         }
     }
 }

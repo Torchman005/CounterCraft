@@ -6,6 +6,8 @@ import net.minecraft.client.world.ClientWorld;
 import net.minecraft.util.math.Vec3d;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.minecraft.client.render.Camera;
+import net.minecraft.client.util.math.MatrixStack;
 
 public final class BridgeClient implements ClientModInitializer {
     public static final BridgeState STATE = new BridgeState();
@@ -14,6 +16,7 @@ public final class BridgeClient implements ClientModInitializer {
     private static long epoch;
     private static boolean enabled;
     private static volatile BridgeState.Pose framePose;
+    private static FrameCapture captures;
 
     @Override public void onInitializeClient() {
         if (!Boolean.getBoolean("countercraft.enabled")) {
@@ -21,13 +24,16 @@ public final class BridgeClient implements ClientModInitializer {
             return;
         }
         try {
-            HostServer server = new HostServer(STATE, Integer.getInteger("countercraft.port", 37122));
+            captures = new FrameCapture(clientCaptureRoot());
+            HostServer server = new HostServer(STATE, Integer.getInteger("countercraft.port", 37122), captures::request);
             enabled = true;
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try { server.close(); } catch (Exception ignored) { }
+                captures.close();
             }, "CounterCraft-Shutdown"));
             LOG.info("Camera lab listening on 127.0.0.1:{}; single-player only", server.port());
         } catch (Exception e) {
+            if (captures != null) captures.close();
             LOG.error("Cannot start camera lab; vanilla camera retained", e);
         }
     }
@@ -48,4 +54,17 @@ public final class BridgeClient implements ClientModInitializer {
                 && client.isInSingleplayer() && !client.isPaused() ? STATE.live(System.nanoTime()) : null;
     }
     public static BridgeState.Pose framePose() { return framePose; }
+
+    public static boolean keepRunningUnfocused() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        return enabled && Boolean.getBoolean("countercraft.background") && client.isInSingleplayer();
+    }
+
+    private static java.nio.file.Path clientCaptureRoot() {
+        return MinecraftClient.getInstance().runDirectory.toPath().resolve("countercraft/captures");
+    }
+
+    public static void captureWorld(Camera camera, double fov, MatrixStack matrices) {
+        if (enabled) captures.afterWorld(MinecraftClient.getInstance(), camera, fov, matrices, framePose);
+    }
 }

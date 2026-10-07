@@ -1,15 +1,18 @@
 # Minecraft 1.20.1 camera lab
 
 This Fabric client mod accepts camera position, yaw/pitch and vertical FOV over
-local TCP. It does **not** export colour/depth, move the simulated player, forward
-clicks or draw anything in CS2 yet.
+local TCP and exports an on-demand world colour/depth bundle. It does **not**
+move the simulated player, forward clicks, share realtime GPU textures or draw
+anything in CS2 yet.
 
 **Validation status:** the full Fabric build succeeded and produced the mod jar.
-All five Java network/state tests passed under Gradle. The development client
+The Java network/state/capture protocol tests pass under Gradle. The development client
 loaded CounterCraft; a new single-player lab world accepted 100 consecutive
 camera requests and a release over real localhost TCP.
-Actual camera movement in a single-player world still needs visual verification;
-loading the client alone does not prove the camera/FOV hooks work in a world.
+Render-side verification passed in that world: two actual camera poses/FOVs and
+projection matrices matched the requests; distinct 1280x720 colour frames and
+non-empty terrain depth were exported, then the vanilla camera returned after
+release. Both exported images were inspected visually.
 
 ## Build
 
@@ -56,6 +59,12 @@ repeatedly reports an OpenAL device reset failure, add `-NullAudio`. This opts
 into OpenAL's null output backend only for that invocation; the lab will have no
 audible sound. Normal launches and the user's PCL settings are unaffected.
 
+Add `-World 'CounterCraft Lab'` to open that already-existing save directly. The
+helper only accepts saves in `minecraft/run/saves` and rejects absent names.
+Optional `-Background` keeps this opted-in single-player lab running when it
+loses window focus, without writing `options.txt`. Explicit pause menus still
+release control and disable capture; multiplayer keeps normal focus behavior.
+
 ## Verify a camera session
 
 Enter and unpause a single-player test world. From the repository root:
@@ -63,11 +72,13 @@ Enter and unpause a single-player test world. From the repository root:
 ```powershell
 python -m bridge.minecraft_host         # status only
 python -m bridge.minecraft_host --demo  # five-second camera motion
+python -m bridge.minecraft_host --capture  # one world colour/depth bundle
+python -m bridge.minecraft_host --verify   # two rendered camera/FOV poses + release
 ```
 
 The game-side port is **37122**, distinct from the Python diagnostic server's
 37121. Only one host is accepted at a time. The wire format is JSON Lines v1:
-`hello` (`role: test` or `cs2`), `status`, `camera`, `release`.
+`hello` (`role: test` or `cs2`), `status`, `camera`, `release`, `capture`.
 
 - Camera `position` is in MC blocks; `rotation` is `[yaw,pitch,0]` in degrees.
 - Frame numbers must increase within each TCP connection, including after release.
@@ -78,5 +89,32 @@ The game-side port is **37122**, distinct from the Python diagnostic server's
 - Two seconds without incoming TCP data closes the connection. Messages are bounded,
   and game objects are only read from Minecraft's client thread.
 
-`ack` means the request was accepted; visual movement still needs in-game verification.
+`ack` means the request was accepted. `--verify` additionally checks the actual
+render-side camera, projection, colour change and depth, and confirms release.
 Check `run/logs/latest.log` for `Camera lab listening` and any Mixin errors.
+
+## Diagnostic world frames
+
+`capture` schedules a single readback on the render thread just after the world
+pass, before vanilla clears depth for the hand/HUD. Only a fresh, unpaused
+single-player world is accepted. The network worker waits at most three seconds;
+PNG/depth writing runs on a separate worker. Capture is bounded to 4,194,304
+pixels and one pending job. GPU readback is synchronous and can stall a frame;
+this is a diagnostic path, not a per-frame compositor feed.
+
+Replies return the local `frame.json` path under
+`minecraft/run/countercraft/captures/<uuid>/`. The manifest is published last:
+
+- `color.png`: world RGBA, top row first, without hand/HUD. Sky and fog remain.
+- `depth.f32`: the same pixel order, little-endian float32 OpenGL window depth
+  in [0,1], **not reversed Z**. This is not directly interchangeable with CS2 depth.
+- `frame.json`: dimensions, world epoch, requested camera sequence (or -1 for
+  vanilla), actual rendered camera/FOV, near/far planes and column-major
+  projection/view rotation matrices. The camera position supplies the separate
+  world translation. `monotonicNanos` is a Java-process clock, not UTC.
+
+`bridge.frame_capture.read_frame` checks dimensions, encoding, matrices, file
+size and finite depth samples. `linear_depth` converts this standard perspective
+depth into positive eye-space distance. Data is ignored by Git; keep it local.
+The wire `renderer: false` still means **no CS2 renderer**, even when capture
+capability is available. Async GPU readback and shared transport are next steps.

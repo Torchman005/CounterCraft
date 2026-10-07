@@ -2,11 +2,16 @@ param(
     [Parameter(Mandatory = $true)][string]$Gradle,
     [string]$JavaHome,
     [ValidateSet('build', 'runClient')][string]$Task = 'build',
-    [switch]$NullAudio
+    [switch]$NullAudio,
+    [ValidatePattern('^[A-Za-z0-9 _-]+$')][string]$World,
+    [switch]$Background
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 if (-not (Test-Path -LiteralPath $Gradle -PathType Leaf)) { throw "Gradle executable not found: $Gradle" }
+if ($World -and ($Task -ne 'runClient' -or -not (Test-Path -LiteralPath (Join-Path $projectRoot "minecraft\run\saves\$World") -PathType Container))) {
+    throw 'World must name an existing isolated lab save, and requires -Task runClient.'
+}
 $oldJava = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'Process')
 $oldAudioDrivers = [Environment]::GetEnvironmentVariable('ALSOFT_DRIVERS', 'Process')
 try {
@@ -15,6 +20,8 @@ try {
     $gradleArguments = @('--no-daemon', '--console=plain', '--info',
         '-Dorg.gradle.internal.http.connectionTimeout=15000',
         '-Dorg.gradle.internal.http.socketTimeout=30000')
+    if ($World) { $gradleArguments += "-PcountercraftWorld=$World" }
+    if ($Background) { $gradleArguments += '-PcountercraftBackground=true' }
     # Java does not automatically inherit HTTP(S)_PROXY. Forward only the host
     # and port for this build; never print or pass embedded proxy credentials.
     foreach ($scheme in @('http', 'https')) {

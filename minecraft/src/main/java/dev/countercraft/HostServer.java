@@ -4,16 +4,26 @@ import com.google.gson.*;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.*;
 
 /** One local host at a time. Bounded JSON Lines with a reconnectable session. */
 public final class HostServer implements AutoCloseable {
+    @FunctionalInterface public interface CaptureProvider {
+        CompletableFuture<JsonObject> request(long epoch);
+    }
     private final BridgeState state;
+    private final CaptureProvider capture;
     private final ServerSocket listener;
     private volatile Socket active;
     private final Thread worker;
 
     public HostServer(BridgeState state, int port) throws IOException {
+        this(state, port, null);
+    }
+
+    public HostServer(BridgeState state, int port, CaptureProvider capture) throws IOException {
         this.state = state;
+        this.capture = capture;
         listener = new ServerSocket();
         listener.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 1);
         worker = new Thread(this::run, "CounterCraft-Host");
@@ -59,6 +69,7 @@ public final class HostServer implements AutoCloseable {
                     reply.addProperty("type", "ready");
                     reply.addProperty("mode", "minecraft-camera-lab");
                     reply.addProperty("renderer", false);
+                    reply.addProperty("capture", capture != null);
                 } else if (type.equals("status") || type.equals("ping")) {
                     BridgeState.World w = state.world();
                     reply.addProperty("type", "status");
@@ -82,6 +93,22 @@ public final class HostServer implements AutoCloseable {
                 } else if (type.equals("release")) {
                     state.release();
                     reply.addProperty("type", "released");
+                } else if (type.equals("capture")) {
+                    BridgeState.World w = state.world();
+                    if (capture == null || !w.offline()
+                            || System.nanoTime() - w.time() > BridgeState.TIMEOUT_NS)
+                        throw new IllegalArgumentException("Capture requires a fresh single-player world");
+                    CompletableFuture<JsonObject> pending = capture.request(w.epoch());
+                    try {
+                        reply = pending.get(3, TimeUnit.SECONDS);
+                    } catch (InterruptedException interrupted) {
+                        pending.cancel(false);
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("Capture interrupted", interrupted);
+                    } catch (ExecutionException | TimeoutException failed) {
+                        pending.cancel(false);
+                        throw new IllegalStateException("Capture unavailable", failed);
+                    }
                 } else throw new IllegalArgumentException("Unsupported message type");
                 send(out, reply);
             } catch (RuntimeException invalid) {

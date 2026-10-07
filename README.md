@@ -1,9 +1,11 @@
 # CounterCraft
 目标：在 **CS2 本机离线模式**中接入真实 Minecraft Java 模拟，包括方块、合成、生物等系统。
 
-**当前状态：前期原型，不能在 CS2 中玩 Minecraft。** 已实现 Python 协议诊断端点、坐标转换、环境检查和离线启动预览，并新增 Fabric 1.20.1 相机接收模组。CS2 适配器和画面合成尚未实现。
+**当前状态：前期原型，不能在 CS2 中玩 Minecraft。** 已实现 Python 协议诊断端点、坐标转换、环境检查和离线启动预览，以及 Fabric 1.20.1 相机接收、按需世界颜色/深度导出。CS2 适配器和画面合成尚未实现。
 
-插件 `universal-modder 0.2.0` 已核验安装启用。Python 的 8 项测试、Gradle 中 Java 网络与状态核心的 5 项测试通过；完整 Fabric 构建成功，已生成模组 jar。开发客户端在独立单人测试世界中完成了 100 帧相机请求及释放握手；实际渲染效果仍待帧缓冲验证。
+插件 `universal-modder 0.2.0` 已核验安装启用。完整 Fabric 构建成功，已生成模组 jar。在独立单人测试世界中，100 帧相机请求及释放通过；帧缓冲验证确认两组实际相机位置、角度和 FOV 匹配请求，导出了 1280×720 颜色图和真实深度，释放后恢复原视角。导出目前用于诊断，不是实时共享纹理。
+
+当前验证：12 项 Python 测试、8 项 Gradle Java 测试通过；游戏内相机、投影、导出、释放及超时恢复验证通过。
 
 ## 本地检查
 
@@ -12,7 +14,7 @@
 ```powershell
 ./game/preflight.ps1
 ./game/launch-offline.ps1  # 仅预览，不启动游戏
-python -m unittest bridge.test_bridge -v
+python -m unittest discover -s bridge -p 'test_*.py' -v
 python -m bridge.bridge_server
 ```
 
@@ -35,5 +37,7 @@ python -m bridge.bridge_server
 `./game/launch-offline.ps1 -Launch` 才会启动原版 CS2，参数为 `-insecure -console +sv_lan 1 +map de_dust2`。已有 CS2 进程时会拒绝启动。该脚本不安装 CounterCraft，启动参数也不构成网络防火墙；不要在开发会话中连接官方服务器。
 
 现有 `1.20.1-OptiFine_I6` 实例和存档未修改。相机模组使用独立的 Fabric 1.20.1 开发实例，不支持 OptiFine 混用。构建、启动和本机相机测试见 [Minecraft 相机实验说明](minecraft/README.md)。
+
+进入开发客户端的单人测试世界后，可执行 `python -m bridge.minecraft_host --verify`，同时验证实际渲染相机、投影、世界深度与释放。`--capture` 仅导出一帧；产物保存在忽略的 `minecraft/run/countercraft/captures/` 中，不提交游戏画面或深度数据。
 
 详见 [MODDING_PLAN.md](MODDING_PLAN.md) 和 [MODLOG.md](MODLOG.md)。插件安装可审阅 `scripts/install-plugin.ps1` 后在普通 PowerShell 中运行。插件安装与游戏适配是两个独立步骤。

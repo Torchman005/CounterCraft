@@ -1,8 +1,57 @@
 # CounterCraft investigation
 
-Date: 2026-10-06
+Started: 2026-10-06
 
-## Current checkpoint (2026-10-07)
+## Render-side camera and world frames (2026-10-07)
+
+- Build/setup checkpoint `291655c` was committed and pushed to `origin/main`.
+- Added on-demand `capture` to the localhost protocol. Networking schedules a
+  future; Minecraft APIs/GL are used only on the render thread. File encoding and
+  writes happen on a separate worker. Capture has a three-second response
+  timeout, one pending job and a 4M-pixel limit. A cancelled unclaimed job frees
+  the slot. PNG/depth are written first; the manifest is published by rename.
+- Inspected cached Minecraft 1.20.1 method signatures/bytecode outside tracked
+  sources. The new injection is immediately after `WorldRenderer.render` in
+  `GameRenderer.renderWorld`, before the vanilla depth clear for the hand/HUD.
+  No decompiled source, game binaries or generated images are committed.
+- Export metadata explicitly records non-reversed OpenGL depth, dimensions,
+  top-to-bottom row order, float32 little-endian samples, near/far, actual camera
+  pose/FOV, column-major projection/view rotation and world epoch. Sky/fog remain.
+- Added a Python bundle reader, depth conversion and `minecraft_host --verify`.
+  It compares actual render-side poses/FOV/projection with two requests, checks
+  geometry in depth, different colour frames, and camera release.
+- Real verification passed in `CounterCraft Lab`: 1280x720; requested frames 3
+  and 7 matched positions/rotations; yaw/pitch/FOV were (0,20,70) and (90,30,55).
+  Depth contained 785,434 and 921,112 geometry pixels with near/far 0.05/768.
+  Release returned to vanilla requestedFrame -1, yaw 100.614868, pitch 24.711832,
+  FOV 70. Exported images were visually inspected: different terrain views,
+  correctly oriented and without the hand, crosshair or inventory.
+- Evidence: `.local/camera-verification.jsonl` and ignored capture bundles
+  `868029d0-ddca-4de5-9343-8873701bd43c` and
+  `92f011da-0ff2-40ab-814d-fed197af312d` under `minecraft/run/countercraft/captures`.
+- Added `-World` for Minecraft 1.20.1's `--quickPlaySingleplayer` into existing
+  isolated lab saves. Optional `-Background` disables only automatic focus-loss
+  pausing in opted-in single-player, without persisting user options. Explicit
+  pauses still stop the bridge. Null audio successfully initialized `No Output`.
+- Final build passed (`.local/build-frame-latest.log`): eight Java tests, zero
+  failures/errors, including timeout cancellation/reconnect. Twelve Python tests
+  passed, and all repository PowerShell scripts parsed successfully.
+- Re-launched the final build with `-NullAudio -World 'CounterCraft Lab'
+  -Background`. It loaded normally; the real render-side verification passed
+  again while the lab was in the background. Final evidence is
+  `.local/camera-verification-final.jsonl` and bundles
+  `d750f9c4-93dd-45ed-a954-5b205c86d257` / `74fe6db0-26e5-4a17-92ac-21ff6f79f0ea`.
+  Both final images were inspected. A further render-side watchdog check passed:
+  after 650 ms without a fresh camera request, capture returned requestedFrame
+  -1 and the vanilla view. Evidence is `.local/watchdog-verification.jsonl`.
+- The development client remains open in the disposable lab world (null audio).
+  All controlled cameras were released or expired. No shared-memory feed or
+  CS2 game-folder installation was performed in this milestone.
+- This completes a guest rendering diagnostic slice. It is not a CS2 port:
+  realtime transport, CS2 camera/render/depth integration, input forwarding,
+  simulation/player movement and interactions remain. Do not call these implemented.
+
+## Earlier build/setup checkpoint (2026-10-07)
 
 This checkpoint supersedes the earlier download/installation blockers below.
 Those sections are retained as the investigation history.
