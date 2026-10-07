@@ -2,6 +2,48 @@
 
 Date: 2026-10-06
 
+## Current checkpoint (2026-10-07)
+
+This checkpoint supersedes the earlier download/installation blockers below.
+Those sections are retained as the investigation history.
+
+- Confirmed `minecraft/build/libs/countercraft-minecraft-0.1.0.jar` exists
+  (15,511 bytes) and includes the mod manifest, refmap and three Mixins.
+  `.local/build-latest.log` reports `BUILD SUCCESSFUL`; the Gradle test XML
+  reports five tests, zero failures and zero errors.
+- The development client loaded CounterCraft 0.1.0, Minecraft 1.20.1 and Fabric
+  Loader 0.19.5. The Python host received `ready` and `status` over real localhost
+  TCP on port 37122. The status was `offline: false` while at the menu, so no
+  in-world camera claim is made yet.
+- Fixed the build helper to forward process HTTP(S)_PROXY host/port to Java,
+  and added a `runClient` task selector. Credentials are not accepted in proxy
+  URLs; process environment changes are restored in `finally`.
+- Codex initially no longer listed the plugin even though its cache existed.
+  Re-registered the inspected upstream checkout as a local marketplace and
+  reinstalled `universal-modder@universal-modder` 0.2.0. A fresh CLI list confirms
+  `installed: true` and `enabled: true`. The installation helper now checks
+  existing installation/marketplace state and verifies the requested plugin;
+  rerunning it on the installed plugin succeeds without reinstalling.
+- Re-ran all eight Python bridge tests: passed, including socket integration.
+- The first development client exited nonzero (-805306369). A restarted client
+  also became unresponsive during the startup screen. Its thread dump showed
+  the render thread inside OpenAL `SOFTHRTF.alcResetDeviceSOFT`, consistent with
+  repeated device reset errors. This is evidence of an audio initialization
+  stall, not a proven Mixin failure. Logs/thread dump remain in ignored `.local`.
+- Stopped only the confirmed stalled lab client PID 38392; no world was open.
+  Added the optional process-local `-NullAudio` switch and restarted the same
+  isolated development client with OpenAL's null output backend for validation.
+- The null-audio client responded normally and the owner opened the new creative
+  world `CounterCraft Lab` under `minecraft/run/saves`. Status returned
+  `offline: true`, epoch 1. The five-second demo received all 100 consecutive
+  camera acknowledgements and a `released` reply. The baseline game screenshot
+  showed the lab terrain. During-demo capture was obscured by another desktop
+  window, so pixel-level proof of the override remains pending. Next add a
+  render-side pose observation and a game framebuffer capture oracle rather
+  than equating accepted network requests with rendered output.
+- Original PCL/OptiFine profiles and saves were not modified. CS2 has not been
+  hooked, launched into official servers, or supplied with a renderer adapter.
+
 ## Requested outcome
 
 Run real Minecraft inside Counter-Strike 2, preserving Minecraft systems rather

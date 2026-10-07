@@ -4,10 +4,12 @@ This Fabric client mod accepts camera position, yaw/pitch and vertical FOV over
 local TCP. It does **not** export colour/depth, move the simulated player, forward
 clicks or draw anything in CS2 yet.
 
-**Validation status:** the Java network/state core compiles and passes five tests.
-The full Fabric build is currently blocked downloading Loom's `mercury-0.4.2.jar`.
-No installable mod jar has been produced, and Mixin hooks/in-game behavior are
-unverified. The steps below describe the intended build and lab workflow.
+**Validation status:** the full Fabric build succeeded and produced the mod jar.
+All five Java network/state tests passed under Gradle. The development client
+loaded CounterCraft; a new single-player lab world accepted 100 consecutive
+camera requests and a release over real localhost TCP.
+Actual camera movement in a single-player world still needs visual verification;
+loading the client alone does not prove the camera/FOV hooks work in a world.
 
 ## Build
 
@@ -25,6 +27,10 @@ The script uses `.local/gradle` in this repository for its cache. The output jar
 `minecraft/build/libs/countercraft-minecraft-0.1.0.jar`. The sources jar is not the
 playable artifact.
 
+For downloads, the script forwards HTTP(S)_PROXY host/port to Gradle's Java
+process. Only HTTP proxy URLs without embedded credentials are supported. It
+does not change the user's persistent Java or proxy configuration.
+
 ## Isolated lab
 
 Keep the existing `1.20.1-OptiFine_I6` instance intact. Use a **separate Fabric
@@ -39,8 +45,16 @@ The mod is inactive by default. The lab JVM argument is:
 
 Loom's `runClient` sets that property and uses the isolated `minecraft/run`
 directory. It opens a development client, not PCL's normal profile. Build first,
-then run `gradle -g ../.local/gradle runClient` from this folder with the same Gradle
-and JDK versions. Do not launch multiple Gradle builds at once.
+then launch from the repository root with the same Gradle and JDK versions:
+
+```powershell
+./scripts/build-minecraft.ps1 -Gradle 'C:\path\to\gradle-8.14\bin\gradle.bat' -JavaHome 'C:\path\to\jdk21' -Task runClient
+```
+
+Do not launch multiple Gradle builds at once. If the window hangs while the log
+repeatedly reports an OpenAL device reset failure, add `-NullAudio`. This opts
+into OpenAL's null output backend only for that invocation; the lab will have no
+audible sound. Normal launches and the user's PCL settings are unaffected.
 
 ## Verify a camera session
 
