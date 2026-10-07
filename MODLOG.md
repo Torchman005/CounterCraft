@@ -2,6 +2,65 @@
 
 Started: 2026-10-06
 
+## Native receiver and client compositor lab (2026-10-07)
+
+- Continuing from pushed checkpoint `3124e17`. Route: Windows x64 native loopback
+  receiver, isolated D3D11 depth-composition oracle, then a ReShade add-on candidate
+  for offline CS2. No CS2 loader/game files are written by the build/test tools.
+- Verified MSVC 14.50.35717, Windows SDK 10.0.26100.0, CMake/Ninja/fxc are available.
+  CS2 install contains rendersystemdx11.dll; this alone is not a runtime API check.
+- Queried ReShade tags: v6.8.0 = 18deaa52de0c425a78b329e9cb3c497281cd00ec.
+  Downloaded its eight API headers and nlohmann/json 3.12.0 into ignored .local;
+  reproducible fetch script pins SHA256. No runtime loader downloaded or installed.
+- Implemented native header/metadata/CRC/depth validation, network-worker-only IO,
+  heartbeat/clock calibration and a latest-frame mailbox. The isolated D3D11
+  shader compares finite guest OpenGL depth with known reversed host perspective
+  depth, flips GL rows and preserves host colour for missing guest frames/sky.
+- First MSVC build and protocol/GPU oracle passed. The GPU oracle used hardware
+  D3D11, with real triangle cube/depth at 80x60 and 128x96. Five groups verified
+  near/far occlusion, row flip, guest sky and exact host-only restoration. Inspected
+  `.local/native-depth-oracle.bmp`.
+- Resumed the separate Minecraft world via fresh Computer Use window selection
+  after an initial minimized-window error. Native 10s test received/uploaded 180
+  frames at 1280x720, zero replacements/stale; age P95 112.3306ms, upload P95
+  4.6551ms, clock uncertainty 0.8508ms. Inspected `.local/native-live.bmp`: real
+  terrain/rain and a known red eye-space cube, with sky preserving host colour.
+  No CS2 camera, scene depth or world alignment was used.
+- Nine independent Python/native socket tests (13 scenarios) found heartbeat
+  starvation during a no-frame `select` wait. Moved heartbeat checks into the
+  20ms wait loop. Epoch/control-loss cleanup then passed. A subsequent fixture
+  failure was Windows' expected ConnectionAbortedError on cancellation; bounded
+  header fragmentation plus explicit cancellation handling fixed the fixture.
+- Added an offline ReShade upload candidate using verified upstream
+  `bool AddonInit(HMODULE,HMODULE)` / `void AddonUninit(HMODULE,HMODULE)` signatures
+  from pinned addon_manager.cpp. No heavy DllMain work or owning global destructor.
+  The actual DLL rejects non-CS2 processes; exact `-insecure` and lab flags are
+  required. D3D11-only resource upload, per-runtime textures, latest-frame fallback,
+  worker-side telemetry and an optional diagnostic inset are implemented.
+- Final native compile had no MSVC warnings/errors. All four CTest suites passed:
+  seven protocol groups, five GPU groups, ten offline guard/DLL refusal groups,
+  nine network integration tests. Existing 18 Python regressions passed. Java
+  source was unchanged; its 16 tests were verified at the previous checkpoint.
+- A later 15s hardware test received/uploaded 272 frames, zero stale/replacements;
+  age P95 165.3964ms, upload P95 4.102ms. Final MC status showed stream stopped,
+  camera inactive and zero leased buffers. The attempted UI pause did not execute:
+  capture became black, activation failed, and fresh recovery showed a locked
+  desktop. Stopped UI actions. Real pause/resize/world-switch GL checks stay open.
+- Prepared `.local/cs2-lab-candidate/install-plan.json` and compiled add-on/config/
+  effect entirely outside CS2. Both proposed game targets (dxgi.dll, ReShade.ini)
+  are currently absent. No game files written. The plan records exact arguments,
+  target-state backup and hash-checked restore requirements. Loader download and
+  install are separate: the official ReShade homepage returned HTTP 403 to the
+  read-only retrieval; no bypass or loader download was attempted.
+- CS2 callback/resource compatibility, FX compilation, actual camera/depth and
+  gameplay remain unverified. The skill requires specific approval before a
+  game-folder loader install; prior plugin/dependency and commit/push approvals
+  do not constitute that new install approval.
+- All PowerShell scripts parsed and staged diff passed whitespace checks.
+  universal-modder publish check on the 59-file source-only index snapshot found
+  zero failures and one existing absolute-user-path warning in this journal.
+  No binaries, headers, screenshots, saves or generated game data are staged.
+
 ## Bounded world frame transport (2026-10-07)
 
 - Starting from pushed checkpoint `7577133`, added a three-PBO/fence readback ring

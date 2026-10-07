@@ -39,13 +39,23 @@ follow a CS2 camera. Existing OptiFine worlds remain untouched.
   timeout, fresh-session restart and host-disconnect cleanup. A 20 FPS-limited
   test received 184 frames/10.005s, estimated age P95 42.82ms. Pause/resize/world
   switch GL lifecycle still needs real-game validation; window activation failed.
-- A CS2 client compositor, GPU shared transport and gameplay input/event routing
-  remain unimplemented. Server-side Source 2 plugins do not solve composition.
+- Native lab checkpoint: isolated D3D11 colour/depth composition and Windows
+  loopback receiver verified. Four CTest suites pass, including nine native socket
+  tests and actual DLL refusal in a non-CS2 process. Hardware MC test received/
+  uploaded 180 frames in 10 seconds, age P95 112.33ms. This uses known eye-space
+  cube geometry, not the CS2 camera/depth.
+- ReShade upload candidate compiles against pinned v6.8.0 headers. Exact offline
+  process/flags guard, per-runtime textures and a diagnostic inset are prepared
+  outside the game directory. No runtime loader is installed; FX compilation and
+  actual CS2 callbacks/resources remain unverified. GPU shared transport and
+  gameplay input/event routing remain unimplemented.
 
 ## Next client slice
 
-Verify the actual offline CS2 renderer, callbacks, camera matrices and depth
-resource for a compositor candidate, then build a native latest-frame receiver
-and a known cube/depth test. The ReShade/GTA reference is not a verified CS2
-adapter. No CS2 loader or client DLL has been installed at this checkpoint.
+Review `.local/cs2-lab-candidate/install-plan.json`, obtain/verify the official full
+add-on loader and get specific game-folder installation approval. Back up target
+states, then verify the actual offline CS2 renderer, upload/effect callbacks and
+lifecycle. Next measure camera matrices/depth and prove an in-world cube.
+The independent cube test and ReShade/GTA reference are not a verified CS2 adapter.
+No CS2 loader or client DLL has been installed at this checkpoint.
 GPU sharing, input/event routing and player/chunk/collision sync remain later work.
