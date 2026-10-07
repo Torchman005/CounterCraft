@@ -2,6 +2,70 @@
 
 Started: 2026-10-06
 
+## Offline CS2 upload validation (2026-10-07)
+
+- User specifically approved installing/testing/restoring the offline loader.
+  Continued from pushed `a039711`. Downloaded official full-add-on ReShade 6.8.0
+  with the upstream example's normal request headers. Read the appended ZIP as
+  data; did not execute setup. Product/version and x64 PE verified, content hashes
+  pinned in scripts/fetch-reshade-runtime.ps1. Installer certificate chain is not
+  trusted locally (UnknownError); DLL is unsigned. Provenance is official HTTPS
+  plus exact pinned content, not a Windows certificate trust claim. No certificate,
+  registry, anti-cheat or security settings were changed.
+- universal-modder backup before writes: 105 files/443 MB, snapshot
+  `C:\Users\23182\.universal-modder\backups\countercraft-cs2-before-loader\20261007-163210.zip`.
+  Added hash-checked, conflict-refusing install/restore scripts. Actual installation
+  creates only game/bin/win64/dxgi.dll. Verified ReShade's official per-process
+  RESHADE_BASE_PATH_OVERRIDE in pinned dll_main.cpp; config, log, effects and caches
+  stay under ignored .local/cs2-lab-candidate. No game-folder ReShade.ini was created.
+- Started the installed Steam client; its normal session was already authenticated.
+  Launched exact owned CS2 PID 44468 with -insecure, lab/preview flags, +sv_lan 1,
+  +map de_dust2. Actual command line and loaded proxy/system DXGI/render DX11
+  modules checked. No third-party-software exception, injection workaround or
+  official-server connection was needed.
+- ReShade 6.8.0.2155 registered the actual add-on and D3D11 runtime. Probe FX
+  compiled successfully. Inspected the real game: MC's live terrain/sky appeared
+  inside the diagnostic inset over local Dust2/bots. Own-texture upload, callback
+  and shader proof only; hostCameraDepthVerified remains false.
+- Main session received 6660 frames and uploaded 5367, resourceFailures=0,
+  guest size 1280x720. Startup received frames before effects presented, so these
+  totals are not a steady-state FPS benchmark. Paused real MC using its menu;
+  stream closed with 'World changed, paused or stale', zero leased buffers. Native
+  mailbox disconnected and the inset disappeared while CS2 still responded.
+  This closes the actual pause/GL cleanup check; resize/world switch remain open.
+- Gracefully closed only the confirmed offline PID. Runtime count became zero;
+  add-on unregistered and ReShade finished exiting. A D3D11 reference-count warning
+  (1478) appeared during teardown. A loader-only control session (no add-on or
+  effects) also exited normally with the same category warning (1213). This does
+  not exclude an add-on leak or identify the warning's cause; detailed lifetime
+  attribution remains open.
+- Updated launch uses PowerShell 7.4+ Start-Process -Environment and private
+  stdout/stderr files. Actual third session PID 42564 confirmed exact offline
+  arguments, the isolated base path, FX compile and explicit paused-MC refusal
+  with zero received/uploaded frames. Graceful close unregistered the add-on and finished
+  ReShade exit; that session also had a reference-count warning (2142).
+- Restored the exact hash-matched new loader with its recorded state; state is
+  Restored. No CS2 processes remain, dxgi.dll and game-folder ReShade.ini absent.
+  universal-modder backup diff against the 16:32 snapshot found no added, removed
+  or changed files in win64. The original PCL/OptiFine instance remains untouched.
+- Five isolated install/restore fixtures passed (20.550s): no-write preview,
+  install/conflict/restore, modified-loader refusal, wrong-backup-source refusal
+  and manipulated-state refusal. All four native CTest suites and 18 existing
+  Python tests passed. Java was unchanged (16 tests at the previous checkpoint).
+  Updated docs separate the verified diagnostic preview from future camera/depth
+  integration and record the one-file temporary install and restore workflow.
+- All ten PowerShell scripts parsed on PowerShell 7.6.5; the new Python fixture
+  passed syntax validation and the staged diff passed whitespace checks.
+  universal-modder publish check on the 63-file source-only index snapshot found
+  zero failures and one absolute-user-path warning in this journal. The recovery
+  path is deliberately retained; no loader/SDK binaries, game files, screenshots,
+  saves or raw console logs are staged.
+- Local evidence (not committed): cs2-preview-first.jpg, cs2-fallback-first.jpg,
+  cs2-probe-session.log, cs2-pause-mc-status.jsonl, cs2-install-result.json and loader
+  provenance/state. The desktop was unlocked; GUI activation was necessary to
+  avoid occluded fullscreen captures. User-input detection was handled by fresh
+  observation; no auth dialog, user settings or long gameplay sequence was driven.
+
 ## Native receiver and client compositor lab (2026-10-07)
 
 - Continuing from pushed checkpoint `3124e17`. Route: Windows x64 native loopback

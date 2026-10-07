@@ -25,6 +25,7 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 Copy-Item -LiteralPath $addon -Destination (Join-Path $Destination 'CounterCraftProbe.addon64') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'cs2\reshade\CounterCraftProbe.fx') -Destination $Destination -Force
 $preset = Join-Path $Destination 'CounterCraftLab.ini'
+$runtime = Join-Path $projectRoot '.local\reshade-runtime\ReShade64.dll'
 @'
 Techniques=CounterCraftProbe@CounterCraftProbe.fx
 TechniqueSorting=CounterCraftProbe@CounterCraftProbe.fx
@@ -40,13 +41,13 @@ PerformanceMode=0
 [INPUT]
 KeyOverlay=36,0,0,0
 "@ | Set-Content -LiteralPath (Join-Path $Destination 'ReShade.ini') -Encoding utf8
-$targets = foreach ($name in @('dxgi.dll', 'ReShade.ini')) {
+$targets = foreach ($name in @('dxgi.dll')) {
     $target = Join-Path $gameDirectory $name
     [pscustomobject]@{
         Path = $target
         Exists = Test-Path -LiteralPath $target
         CurrentSha256 = if (Test-Path -LiteralPath $target -PathType Leaf) { (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash } else { $null }
-        Source = if ($name -eq 'dxgi.dll') { 'Not supplied: official ReShade 6.8.0 x64 full add-on loader required' } else { Join-Path $Destination $name }
+        Source = if (Test-Path -LiteralPath $runtime -PathType Leaf) { $runtime } else { 'Not supplied: official ReShade 6.8.0 x64 full add-on loader required' }
     }
 }
 $plan = [pscustomobject]@{
@@ -54,13 +55,14 @@ $plan = [pscustomobject]@{
     GameFilesWritten = $false
     Executable = $cs2
     Arguments = @('-insecure', '-countercraft-lab', '-countercraft-preview', '-console', '+sv_lan', '1', '+map', 'de_dust2')
+    Environment = @{ RESHADE_BASE_PATH_OVERRIDE = $Destination }
     CandidateAddon = Join-Path $Destination 'CounterCraftProbe.addon64'
     CandidateSha256 = (Get-FileHash -LiteralPath (Join-Path $Destination 'CounterCraftProbe.addon64') -Algorithm SHA256).Hash
     Targets = @($targets)
     BackupDirectory = Join-Path $projectRoot '.local\cs2-loader-backup'
     InstallPolicy = 'Requires specific approval. Stop CS2; snapshot target states; refuse an existing loader/config unless reviewed; verify official loader provenance before copying.'
-    RestorePolicy = 'Stop CS2; restore backed-up originals or remove only the two newly installed, hash-matched target files. Keep backups/evidence. Restore before normal CS2 use.'
-    VerifiedScope = 'Native protocol/socket/GPU oracle and addon compile/refusal. No real CS2 callback, FX compile, host camera/depth or gameplay validation yet.'
+    RestorePolicy = 'Stop CS2; remove only the newly installed, hash-matched dxgi.dll. Keep backup/evidence. Restore before normal CS2 use. Config/logs/cache stay outside the game via the official per-process base-path override.'
+    VerifiedScope = 'Native protocol/socket/GPU oracle, addon refusal and real offline CS2 D3D11 callbacks, own-texture upload, FX compilation and MC pause fallback. Host camera/depth/world fusion, resize and gameplay remain unverified. See MODLOG for build-specific evidence.'
 }
 $plan | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $Destination 'install-plan.json') -Encoding utf8
 $plan | ConvertTo-Json -Depth 6

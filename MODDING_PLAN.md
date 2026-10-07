@@ -37,25 +37,31 @@ follow a CS2 camera. Existing OptiFine worlds remain untouched.
 - Milestone 3 transport checkpoint passed: 18 Python and 16 Java tests; real
   1280x720 streaming, camera/projection/depth/release, non-reading receiver
   timeout, fresh-session restart and host-disconnect cleanup. A 20 FPS-limited
-  test received 184 frames/10.005s, estimated age P95 42.82ms. Pause/resize/world
-  switch GL lifecycle still needs real-game validation; window activation failed.
+  test received 184 frames/10.005s, estimated age P95 42.82ms. Actual pause/GL
+  cleanup was later verified in the offline CS2 session; resize/world switch
+  lifecycle remains open.
 - Native lab checkpoint: isolated D3D11 colour/depth composition and Windows
   loopback receiver verified. Four CTest suites pass, including nine native socket
   tests and actual DLL refusal in a non-CS2 process. Hardware MC test received/
   uploaded 180 frames in 10 seconds, age P95 112.33ms. This uses known eye-space
   cube geometry, not the CS2 camera/depth.
-- ReShade upload candidate compiles against pinned v6.8.0 headers. Exact offline
-  process/flags guard, per-runtime textures and a diagnostic inset are prepared
-  outside the game directory. No runtime loader is installed; FX compilation and
-  actual CS2 callbacks/resources remain unverified. GPU shared transport and
-  gameplay input/event routing remain unimplemented.
+- ReShade 6.8.0 actual offline CS2 check passed: D3D11 callbacks, own-texture
+  uploads and FX compilation. Real MC terrain/sky appeared in a diagnostic inset;
+  MC pause stopped the stream, released buffers and removed the inset. A session
+  received/uploaded 6660/5367 frames, with zero resource creation failures; totals
+  include startup and are not an FPS benchmark. Actual camera/depth/world fusion
+  remains unverified. GPU shared transport and gameplay routing are unimplemented.
+- Approved temporary installation created only dxgi.dll; the official process
+  base-path override isolated config/log/effects/cache. Installation and restore
+  fixtures pass five tests. After graceful exit the loader was removed and the
+  game directory exactly matched its pre-install backup. A teardown reference
+  warning also appeared with only ReShade loaded; attribution/lifetime remains open.
 
 ## Next client slice
 
-Review `.local/cs2-lab-candidate/install-plan.json`, obtain/verify the official full
-add-on loader and get specific game-folder installation approval. Back up target
-states, then verify the actual offline CS2 renderer, upload/effect callbacks and
-lifecycle. Next measure camera matrices/depth and prove an in-world cube.
+Measure the actual offline CS2 camera matrices/depth and prove an in-world cube
+with correct occlusion. Also test resize/world-switch and resource lifetime.
+Use the reviewed temporary loader workflow and backup/restore scripts for each
+test session; the loader is currently restored.
 The independent cube test and ReShade/GTA reference are not a verified CS2 adapter.
-No CS2 loader or client DLL has been installed at this checkpoint.
 GPU sharing, input/event routing and player/chunk/collision sync remain later work.

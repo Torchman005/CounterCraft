@@ -9,29 +9,41 @@ official matchmaking.
 
 ## Native checkpoint
 
-The [native lab](native/README.md) now validates Windows loopback reception and
-isolated D3D11 depth composition, with four passing CTest suites. A ReShade
-upload/diagnostic-inset candidate has compiled and its actual DLL rejects a
-non-CS2 process. `scripts/prepare-cs2-lab.ps1` prepares an installation preview
-outside the game directory. It does not install a loader.
+The [native lab](native/README.md) validates Windows loopback reception and
+isolated D3D11 depth composition, with four passing CTest suites. The ReShade
+upload/diagnostic-inset add-on was also verified in actual offline CS2 on
+2026-10-07: D3D11 callbacks, own-texture uploads and FX compilation succeeded.
+Live Minecraft terrain/sky appeared in an inset over local Dust2. Pausing the
+Minecraft world stopped its stream, released its buffers and removed the inset.
 
-Real Minecraft frames were received and uploaded on hardware D3D11 (180/10s,
-1280x720, age P95 112.33ms), using known eye-space host geometry. No CS2 camera,
-depth, API callback or effect compilation has been verified. Do not describe the
-diagnostic inset or independent GPU oracle as CS2 world composition.
+The CS2 session received 6660 frames and uploaded 5367 at guest size 1280x720,
+with zero reported resource creation failures. Startup reception preceded effect
+presentation, so these totals are not a steady-state FPS measurement. The
+independent D3D11 test (180 frames/10s, age P95 112.33ms) uses known eye-space
+geometry. Actual CS2 camera/depth and world alignment remain unverified; the
+inset and independent GPU oracle do not establish CS2 world composition.
+
+The approved temporary install created only `game/bin/win64/dxgi.dll`. Official
+`RESHADE_BASE_PATH_OVERRIDE` kept config/effects/logs/cache outside the game via
+the launched process environment. The loader was restored after graceful exits;
+the game directory matches its pre-install backup. A D3D11 reference-count
+warning also occurred with only ReShade loaded, so leak attribution remains open.
+Five install/restore fixture tests pass. See the native README for the reversible
+PowerShell 7.4+ workflow.
 
 ## Next client slice
 
 The Minecraft prototype now exposes [bounded binary world frames](../docs/frame-stream.md).
 Its independent Python receiver also serves as a native interoperability oracle.
-The next client experiment is installing/testing the compiled ReShade candidate
-after specific approval and a backup. No ReShade/Metamod/CounterStrikeSharp installation is included in
-this checkpoint. The upstream GTA compositor is an architectural reference, not
+The next client experiment is measuring CS2's actual rendered camera/projection
+and depth, then proving an in-world cube with correct occlusion. Resize and world
+switch lifecycle checks are also open. No Metamod/CounterStrikeSharp installation
+is included. The upstream GTA compositor is an architectural reference, not
 a CS2-compatible binary or verified Source 2 API.
 
-The host must first prove resource creation/upload and a known cube with depth
-ordering in the actual offline CS2 renderer. It must then obtain and verify the
-actual rendered view/projection and compatible host depth. Server eye position
+Own-resource creation/upload is now proven in the offline renderer. Camera and
+depth measurements must establish a compatible coordinate space before the
+in-world cube/depth test. Server eye position
 or the Python camera demo does not establish client camera integration. Renderer
 API, depth resource selection, reversed-Z, resolution and callback timing need
 measurement on this installed CS2 build before Minecraft composition is claimed.
