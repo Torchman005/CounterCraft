@@ -1,11 +1,11 @@
 # CounterCraft
 目标：在 **CS2 本机离线模式**中接入真实 Minecraft Java 模拟，包括方块、合成、生物等系统。
 
-**当前状态：前期原型，不能在 CS2 中玩 Minecraft。** 已实现 Python 协议诊断端点、坐标转换、环境检查和离线启动预览，以及 Fabric 1.20.1 相机接收、按需世界颜色/深度导出。CS2 适配器和画面合成尚未实现。
+**当前状态：前期原型，不能在 CS2 中玩 Minecraft。** 已实现 Python 协议诊断端点、坐标转换、环境检查和离线启动预览，以及 Fabric 1.20.1 相机接收、按需世界颜色/深度导出、GPU 异步读回和有界本机帧流。CS2 适配器和画面合成尚未实现。
 
-插件 `universal-modder 0.2.0` 已核验安装启用。完整 Fabric 构建成功，已生成模组 jar。在独立单人测试世界中，100 帧相机请求及释放通过；帧缓冲验证确认两组实际相机位置、角度和 FOV 匹配请求，导出了 1280×720 颜色图和真实深度，释放后恢复原视角。导出目前用于诊断，不是实时共享纹理。
+插件 `universal-modder 0.2.0` 已核验安装启用。完整 Fabric 构建成功，已生成模组 jar。在独立单人测试世界中，相机请求、实际渲染参数、真实地形深度和释放后的恢复通过。新增帧流用三槽 PBO/fence 异步读回，通过本机 TCP 发送 RGBA、深度和同帧矩阵；慢消费只保留最新帧。这仍是 CPU 拷贝原型，不是 GPU 共享纹理。
 
-当前验证：12 项 Python 测试、8 项 Gradle Java 测试通过；游戏内相机、投影、导出、释放及超时恢复验证通过。
+当前验证：18 项 Python、16 项 Gradle Java 测试通过。真实 1280×720 帧流测试中，20 FPS 上限下实收约 18.4 FPS，延迟估计 P95 约 43 毫秒；相机、投影、深度、释放、慢接收端超时及重连通过。实际暂停/缩放仍待游戏内检查。详见 [帧流协议](docs/frame-stream.md) 与 [MODLOG.md](MODLOG.md)。
 
 ## 本地检查
 
@@ -40,4 +40,15 @@ python -m bridge.bridge_server
 
 进入开发客户端的单人测试世界后，可执行 `python -m bridge.minecraft_host --verify`，同时验证实际渲染相机、投影、世界深度与释放。`--capture` 仅导出一帧；产物保存在忽略的 `minecraft/run/countercraft/captures/` 中，不提交游戏画面或深度数据。
 
+连续帧流测试：
+
+```powershell
+python -m bridge.stream_host --verify --seconds 10 --fps 20
+python -m bridge.stream_host --seconds 10 --fps 30 --consumer-ms 200
+```
+
+接收端校验会话、世界、尺寸、帧序号及 CRC；请求的 FPS 是上限。测试输出实际接收数、替换数、旧帧数及延迟估计，不能据此承诺 60 FPS。
+
 详见 [MODDING_PLAN.md](MODDING_PLAN.md) 和 [MODLOG.md](MODLOG.md)。插件安装可审阅 `scripts/install-plugin.ps1` 后在普通 PowerShell 中运行。插件安装与游戏适配是两个独立步骤。
+
+开发参考 [universal-modder](https://github.com/rehan-remade/universal-modder) 的 mashup-mods 工作流；Minecraft 适配使用 Fabric Loader、Fabric Loom 和 Yarn。代码由 Codex 协助开发，仓库只发布自有桥接源码。

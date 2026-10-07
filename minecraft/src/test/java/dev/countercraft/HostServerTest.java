@@ -154,6 +154,64 @@ class HostServerTest {
     private static JsonObject reply(BufferedReader reader) throws IOException {
         return JsonParser.parseString(reader.readLine()).getAsJsonObject();
     }
+
+    @Test void streamControlsAndDisconnectBelongToHostSession() throws Exception {
+        BridgeState state = new BridgeState();
+        java.util.concurrent.atomic.AtomicInteger stopped = new java.util.concurrent.atomic.AtomicInteger();
+        HostServer.StreamProvider provider = new HostServer.StreamProvider() {
+            public JsonObject start(long epoch, int fps) {
+                assertEquals(7, epoch); assertEquals(20, fps);
+                JsonObject reply = new JsonObject(); reply.addProperty("type", "stream-started"); return reply;
+            }
+            public JsonObject status() { JsonObject result = new JsonObject(); result.addProperty("running", false); return result; }
+            public void stop() { stopped.incrementAndGet(); }
+        };
+        try (HostServer server = new HostServer(state, 0, null, provider)) {
+            try (Socket client = new Socket("127.0.0.1", server.port())) {
+                client.setSoTimeout(3000);
+                BufferedReader reader = new BufferedReader(new InputStreamReader(client.getInputStream()));
+                send(client.getOutputStream(), "{\"v\":1,\"type\":\"hello\",\"role\":\"test\"}");
+                assertTrue(reply(reader).get("stream").getAsBoolean());
+                state.update(new BridgeState.World(7, true, 0, 64, 0, System.nanoTime()));
+                send(client.getOutputStream(), "{\"v\":1,\"type\":\"stream-start\",\"fps\":20}");
+                assertEquals("stream-started", reply(reader).get("type").getAsString());
+                send(client.getOutputStream(), "{\"v\":1,\"type\":\"status\"}");
+                JsonObject status = reply(reader);
+                assertTrue(status.has("serverMonotonicNanos"));
+                assertFalse(status.getAsJsonObject("stream").get("running").getAsBoolean());
+                send(client.getOutputStream(), "{\"v\":1,\"type\":\"stream-stop\"}");
+                assertEquals("stream-stopped", reply(reader).get("type").getAsString());
+                assertEquals(1, stopped.get());
+            }
+            long deadline = System.nanoTime() + 1_000_000_000;
+            while (stopped.get() < 2 && System.nanoTime() < deadline) Thread.sleep(5);
+            assertEquals(2, stopped.get());
+        }
+    }
+
+    @Test void streamRejectsMenuStaleWorldAndInvalidRate() throws Exception {
+        for (int scenario = 0; scenario < 4; scenario++) {
+            BridgeState state = new BridgeState();
+            state.update(new BridgeState.World(1, scenario != 0, 0, 64, 0,
+                    System.nanoTime() - (scenario == 1 ? BridgeState.TIMEOUT_NS * 2 : 0)));
+            HostServer.StreamProvider provider = new HostServer.StreamProvider() {
+                public JsonObject start(long epoch, int fps) { fail("Invalid stream must not start"); return null; }
+                public JsonObject status() { return new JsonObject(); }
+                public void stop() { }
+            };
+            try (HostServer server = new HostServer(state, 0, null, provider);
+                 Socket client = new Socket("127.0.0.1", server.port())) {
+                client.setSoTimeout(2000);
+                BufferedReader reader = new BufferedReader(new InputStreamReader(client.getInputStream()));
+                send(client.getOutputStream(), "{\"v\":1,\"type\":\"hello\",\"role\":\"test\"}");
+                assertEquals("ready", reply(reader).get("type").getAsString());
+                int fps = scenario == 2 ? 0 : scenario == 3 ? 31 : 20;
+                send(client.getOutputStream(), "{\"v\":1,\"type\":\"stream-start\",\"fps\":" + fps + "}");
+                assertEquals("error", reply(reader).get("type").getAsString());
+                assertNull(reader.readLine());
+            }
+        }
+    }
     private static void send(OutputStream out, String value) throws IOException {
         out.write((value + "\n").getBytes(StandardCharsets.UTF_8));
         out.flush();

@@ -74,10 +74,21 @@ public final class FrameCapture implements AutoCloseable {
             float[] depth = new float[pixels];
             readPixels(framebuffer, width, height, rgba, depth);
 
+            JsonObject metadata = metadata(client, camera, fov, matrices, pose, world.epoch(), width, height, System.nanoTime());
+            writer.execute(() -> save(job, width, height, rgba, depth, metadata));
+        } catch (RuntimeException failed) {
+            LOG.warn("World readback failed", failed);
+            job.result.completeExceptionally(failed);
+            pending.compareAndSet(job, null);
+        }
+    }
+
+    static JsonObject metadata(MinecraftClient client, Camera camera, double fov, MatrixStack matrices,
+                               BridgeState.Pose pose, long epoch, int width, int height, long capturedNanos) {
             JsonObject metadata = new JsonObject();
             metadata.addProperty("v", 1);
             metadata.addProperty("type", "world-frame");
-            metadata.addProperty("epoch", world.epoch());
+            metadata.addProperty("epoch", epoch);
             metadata.addProperty("requestedFrame", pose == null ? -1 : pose.frame());
             metadata.addProperty("width", width);
             metadata.addProperty("height", height);
@@ -89,7 +100,7 @@ public final class FrameCapture implements AutoCloseable {
             metadata.addProperty("includesSkyFog", true);
             metadata.addProperty("near", 0.05);
             metadata.addProperty("far", client.gameRenderer.getFarPlaneDistance());
-            metadata.addProperty("monotonicNanos", System.nanoTime());
+            metadata.addProperty("monotonicNanos", capturedNanos);
             Vec3d position = camera.getPos();
             JsonObject actual = new JsonObject();
             actual.add("position", array(position.x, position.y, position.z));
@@ -98,12 +109,7 @@ public final class FrameCapture implements AutoCloseable {
             metadata.add("camera", actual);
             metadata.add("projectionColumnMajor", array(RenderSystem.getProjectionMatrix().get(new float[16])));
             metadata.add("viewRotationColumnMajor", array(matrices.peek().getPositionMatrix().get(new float[16])));
-            writer.execute(() -> save(job, width, height, rgba, depth, metadata));
-        } catch (RuntimeException failed) {
-            LOG.warn("World readback failed", failed);
-            job.result.completeExceptionally(failed);
-            pending.compareAndSet(job, null);
-        }
+            return metadata;
     }
 
     private static JsonArray array(double... values) {

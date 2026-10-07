@@ -17,6 +17,7 @@ public final class BridgeClient implements ClientModInitializer {
     private static boolean enabled;
     private static volatile BridgeState.Pose framePose;
     private static FrameCapture captures;
+    private static FrameStream frames;
 
     @Override public void onInitializeClient() {
         if (!Boolean.getBoolean("countercraft.enabled")) {
@@ -25,11 +26,13 @@ public final class BridgeClient implements ClientModInitializer {
         }
         try {
             captures = new FrameCapture(clientCaptureRoot());
-            HostServer server = new HostServer(STATE, Integer.getInteger("countercraft.port", 37122), captures::request);
+            frames = new FrameStream();
+            HostServer server = new HostServer(STATE, Integer.getInteger("countercraft.port", 37122), captures::request, frames);
             enabled = true;
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try { server.close(); } catch (Exception ignored) { }
                 captures.close();
+                frames.stop();
             }, "CounterCraft-Shutdown"));
             LOG.info("Camera lab listening on 127.0.0.1:{}; single-player only", server.port());
         } catch (Exception e) {
@@ -50,6 +53,7 @@ public final class BridgeClient implements ClientModInitializer {
 
     public static void beginFrame() {
         MinecraftClient client = MinecraftClient.getInstance();
+        if (enabled) frames.beginFrame(client);
         framePose = enabled && client.world != null && client.world == previous
                 && client.isInSingleplayer() && !client.isPaused() ? STATE.live(System.nanoTime()) : null;
     }
@@ -65,6 +69,12 @@ public final class BridgeClient implements ClientModInitializer {
     }
 
     public static void captureWorld(Camera camera, double fov, MatrixStack matrices) {
-        if (enabled) captures.afterWorld(MinecraftClient.getInstance(), camera, fov, matrices, framePose);
+        if (enabled) {
+            frames.afterWorld(MinecraftClient.getInstance(), camera, fov, matrices, framePose);
+            captures.afterWorld(MinecraftClient.getInstance(), camera, fov, matrices, framePose);
+        }
+    }
+    public static void closeRender() {
+        if (enabled) frames.closeRender();
     }
 }

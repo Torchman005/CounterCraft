@@ -1,8 +1,9 @@
 # Minecraft 1.20.1 camera lab
 
 This Fabric client mod accepts camera position, yaw/pitch and vertical FOV over
-local TCP and exports an on-demand world colour/depth bundle. It does **not**
-move the simulated player, forward clicks, share realtime GPU textures or draw
+local TCP, exports an on-demand world colour/depth bundle and streams bounded
+binary world frames with asynchronous GPU readback. It does **not**
+move the simulated player, forward clicks, share GPU textures or draw
 anything in CS2 yet.
 
 **Validation status:** the full Fabric build succeeded and produced the mod jar.
@@ -117,4 +118,25 @@ Replies return the local `frame.json` path under
 size and finite depth samples. `linear_depth` converts this standard perspective
 depth into positive eye-space distance. Data is ignored by Git; keep it local.
 The wire `renderer: false` still means **no CS2 renderer**, even when capture
-capability is available. Async GPU readback and shared transport are next steps.
+and stream capabilities are available.
+
+## Continuous world frames
+
+The independent receiver validates actual frames and measures transport:
+
+```powershell
+python -m bridge.stream_host --verify --seconds 10 --fps 20 --snapshot .local/stream.png
+python -m bridge.stream_host --seconds 10 --fps 30 --consumer-ms 200
+```
+
+`stream-start`/`stream-stop` extend the control protocol. A stream gets a fresh
+UUID and ephemeral loopback TCP port; its lifetime belongs to its control host.
+World readback uses three PBOs and zero-timeout fence polling. CPU copy and TCP
+publication are bounded by two leased arrays and one replaceable pending frame.
+Pause, stale ticks, world change and host disconnect stop the stream; a stalled
+receiver times out rather than block rendering. Reconnect creates a new session.
+
+Streaming preserves GL bottom-to-top row order, unlike top-to-bottom diagnostic
+PNG bundles. Depth remains non-reversed OpenGL window-z. Camera/matrices are
+frozen at issue time. This is a CPU-copy prototype for a future compositor;
+there is no CS2 client integration yet. See [binary layout and timing](../docs/frame-stream.md).

@@ -11,8 +11,14 @@ public final class HostServer implements AutoCloseable {
     @FunctionalInterface public interface CaptureProvider {
         CompletableFuture<JsonObject> request(long epoch);
     }
+    public interface StreamProvider {
+        JsonObject start(long epoch, int fps);
+        JsonObject status();
+        void stop();
+    }
     private final BridgeState state;
     private final CaptureProvider capture;
+    private final StreamProvider stream;
     private final ServerSocket listener;
     private volatile Socket active;
     private final Thread worker;
@@ -22,8 +28,12 @@ public final class HostServer implements AutoCloseable {
     }
 
     public HostServer(BridgeState state, int port, CaptureProvider capture) throws IOException {
+        this(state, port, capture, null);
+    }
+    public HostServer(BridgeState state, int port, CaptureProvider capture, StreamProvider stream) throws IOException {
         this.state = state;
         this.capture = capture;
+        this.stream = stream;
         listener = new ServerSocket();
         listener.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 1);
         worker = new Thread(this::run, "CounterCraft-Host");
@@ -43,6 +53,7 @@ public final class HostServer implements AutoCloseable {
                 // A host can disconnect at any time; a later connection starts fresh.
             } finally {
                 state.release();
+                if (stream != null) stream.stop();
                 active = null;
             }
         }
@@ -70,6 +81,7 @@ public final class HostServer implements AutoCloseable {
                     reply.addProperty("mode", "minecraft-camera-lab");
                     reply.addProperty("renderer", false);
                     reply.addProperty("capture", capture != null);
+                    reply.addProperty("stream", stream != null);
                 } else if (type.equals("status") || type.equals("ping")) {
                     BridgeState.World w = state.world();
                     reply.addProperty("type", "status");
@@ -79,6 +91,8 @@ public final class HostServer implements AutoCloseable {
                     JsonArray pos = new JsonArray();
                     pos.add(w.x()); pos.add(w.y()); pos.add(w.z());
                     reply.add("position", pos);
+                    reply.addProperty("serverMonotonicNanos", System.nanoTime());
+                    if (stream != null) reply.add("stream", stream.status());
                 } else if (type.equals("camera")) {
                     long frame = integer(m, "frame");
                     if (frame <= last) throw new IllegalArgumentException("Frame must increase");
@@ -93,6 +107,18 @@ public final class HostServer implements AutoCloseable {
                 } else if (type.equals("release")) {
                     state.release();
                     reply.addProperty("type", "released");
+                } else if (type.equals("stream-start")) {
+                    BridgeState.World w = state.world();
+                    long fps = integer(m, "fps");
+                    if (stream == null || fps < 1 || fps > 30 || !w.offline()
+                            || System.nanoTime() - w.time() > BridgeState.TIMEOUT_NS)
+                        throw new IllegalArgumentException("Stream requires fresh singleplayer and fps 1..30");
+                    reply = stream.start(w.epoch(), (int) fps);
+                } else if (type.equals("stream-stop")) {
+                    if (stream == null) throw new IllegalArgumentException("No frame stream provider");
+                    stream.stop();
+                    reply = stream.status();
+                    reply.addProperty("type", "stream-stopped");
                 } else if (type.equals("capture")) {
                     BridgeState.World w = state.world();
                     if (capture == null || !w.offline()
@@ -161,5 +187,6 @@ public final class HostServer implements AutoCloseable {
         Socket socket = active;
         if (socket != null) socket.close();
         state.release();
+        if (stream != null) stream.stop();
     }
 }

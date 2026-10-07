@@ -2,6 +2,50 @@
 
 Started: 2026-10-06
 
+## Bounded world frame transport (2026-10-07)
+
+- Starting from pushed checkpoint `7577133`, added a three-PBO/fence readback ring
+  and a loopback binary TCP feed. This deliberately chooses a portable CPU-copy
+  prototype before GPU sharing; it does not install a CS2 renderer/loader.
+- The feed has two leased payload buffers and a replaceable pending frame.
+  Nonblocking socket writes have a 500 ms deadline. Metadata is frozen at issue;
+  session UUID, epoch, sequence, exact lengths and CRC32 protect the receiver.
+- Added an independent Python latest-frame receiver, clock calibration and an
+  actual-camera stream verifier. The binary layout is in docs/frame-stream.md.
+- Final build succeeded; 18 Python and 16 Java tests passed, including fragmented and
+  corrupt frames, stale/restarted sessions, bounded buffers and non-reading TCP.
+- Gracefully closed the prior lab client and confirmed all dimensions saved before
+  building. Restarted the isolated lab using null audio/background flags.
+- Found a validation-tool bottleneck: scanning a full depth array/encoding PNG
+  during live reception could starve Python TCP drain and trigger the intended
+  500ms write deadline. Fixed the verifier to retain four bounded diagnostic
+  frames and do deep scans/PNG encoding only after stopping the stream.
+- Final real 1280x720 verification: 184 received/consumed frames in 10.005s with
+  a 20 FPS cap; zero sender drops, receiver replacements or stale frames. Clock
+  uncertainty 0.248ms; estimated age median/P95/max 34.734/42.824/60.157ms;
+  readback P95 18.562ms. Both controlled camera/FOV/projection poses, distinct
+  colours, real terrain depth and vanilla view after release passed. PNGs inspected.
+- Slow-consumer test: 30 FPS cap, 280 frames in 10.103s; foreground consumed 49,
+  replaced 230, no sender drops/stale frames, estimated age P95 64.470ms.
+- A genuinely non-reading receiver timed out in 0.571s with the explicit 500ms
+  write-deadline reason and zero leases. Restart delivered sequence 1 under a
+  different UUID. Closing control stopped the stream and released camera control.
+- Existing on-demand camera/capture verifier passed again on the final build.
+  Final evidence is ignored under .local/: build-stream-final.log,
+  stream-verification-final.jsonl, stream-benchmark-final.jsonl,
+  stream-slow-final.jsonl, stream-hygiene.jsonl, capture-regression-final.jsonl,
+  client-stream-final.log and stream-final*.png. Generated game data is untracked.
+- Real pause/resize/world-switch GL validation is still open. Window activation
+  failed twice; the lifetime test therefore timed out without those actions.
+  Normal close of the confirmed lab PID succeeded and all dimensions saved before
+  the final build. Protocol menu/stale-world tests are not a substitute for GL tests.
+- Assessed the next CS2 slice in cs2/README.md: native receiver, offline client
+  resource upload/cube-depth oracle, then actual host camera/depth integration.
+  No CS2 loader/client files installed, no shared GPU texture or playable port.
+- universal-modder publish check ran on a 39-file source-only staging copy:
+  zero failures, one warning for an already-recorded absolute user/plugin path
+  in this journal. No game files, caches, frames, saves or credentials are staged.
+
 ## Render-side camera and world frames (2026-10-07)
 
 - Build/setup checkpoint `291655c` was committed and pushed to `origin/main`.

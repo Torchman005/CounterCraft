@@ -18,7 +18,7 @@ follow a CS2 camera. Existing OptiFine worlds remain untouched.
 
 1. `bridge/protocol.py` defines camera messages and coordinate transforms; diagnostic TCP handshake and validation have tests. It is not a renderer or relay.
 2. Fabric 1.20.1 camera lab: receive host poses over localhost, apply render-only camera/FOV overrides, and restore the vanilla view on timeout. Validate actual render-side poses and export diagnostic world colour/depth.
-3. Add async readback/shared frame transport. Then implement the CS2 offline host adapter and render one test cube with depth ordering.
+3. Async world readback/bounded frame transport, verified independently. Then implement the CS2 offline host adapter and render one test cube with depth ordering.
 4. Add block/entity/event/input forwarding and player/chunk sync, then package a launcher and backup/restore flow.
 
 ## Verified checkpoint (2026-10-07)
@@ -31,7 +31,21 @@ follow a CS2 camera. Existing OptiFine worlds remain untouched.
 - Milestone 2 world validation passed: render-side camera position/rotation,
   FOV and projection matched two requested poses. World colour/depth exported at
   1280x720 and the original view returned on release. Images were inspected.
-- Current export uses bounded, synchronous diagnostic GPU readback and worker
-  disk writes. It is not realtime frame sharing.
-- A CS2 client compositor, shared transport and gameplay input/event routing
+- Diagnostic export still uses synchronous readback and worker disk writes.
+  The additional stream uses a three-PBO ring, nonblocking fence polls, bounded
+  CPU-copy payloads and an independent binary TCP receiver; no GPU sharing yet.
+- Milestone 3 transport checkpoint passed: 18 Python and 16 Java tests; real
+  1280x720 streaming, camera/projection/depth/release, non-reading receiver
+  timeout, fresh-session restart and host-disconnect cleanup. A 20 FPS-limited
+  test received 184 frames/10.005s, estimated age P95 42.82ms. Pause/resize/world
+  switch GL lifecycle still needs real-game validation; window activation failed.
+- A CS2 client compositor, GPU shared transport and gameplay input/event routing
   remain unimplemented. Server-side Source 2 plugins do not solve composition.
+
+## Next client slice
+
+Verify the actual offline CS2 renderer, callbacks, camera matrices and depth
+resource for a compositor candidate, then build a native latest-frame receiver
+and a known cube/depth test. The ReShade/GTA reference is not a verified CS2
+adapter. No CS2 loader or client DLL has been installed at this checkpoint.
+GPU sharing, input/event routing and player/chunk/collision sync remain later work.
