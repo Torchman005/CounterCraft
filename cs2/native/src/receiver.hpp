@@ -1,9 +1,11 @@
 #pragma once
 #include "frame.hpp"
+#include "host_camera.hpp"
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <optional>
 
 namespace cc {
 struct ReceiverStats {
@@ -11,6 +13,8 @@ struct ReceiverStats {
     bool connected{};
     std::string failure;
     int64_t clock_uncertainty_ns{};
+    uint64_t cameras_sent{},camera_releases{};
+    uint64_t cameras_rendered{};
 };
 class Receiver {
 public:
@@ -21,6 +25,7 @@ public:
     ReceiverStats stats() const;
     void stop();
     double age_ms(const Frame&) const;
+    void submit_camera(const HostCamera&,uint64_t sequence,int64_t captured_ns);
 private:
     void run();
     std::thread worker_;
@@ -32,5 +37,7 @@ private:
     std::shared_ptr<const Frame> latest_;
     mutable uint64_t last_observed_{};
     ReceiverStats stats_;
+    struct CameraUpdate { HostCamera camera; uint64_t sequence{}; int64_t captured_ns{}; };
+    std::optional<CameraUpdate> camera_;
 };
 }

@@ -5,7 +5,7 @@ import struct
 import tempfile
 import unittest
 
-from bridge.camera_evidence import analyze_capture, cross, dot, multiply
+from bridge.camera_evidence import analyze_capture, calibration, cross, dot, multiply
 
 
 class CameraEvidenceTests(unittest.TestCase):
@@ -57,6 +57,15 @@ class CameraEvidenceTests(unittest.TestCase):
             candidate = analyze_capture(self.path)['candidates'][0]
             self.assertEqual(candidate['view']['byteOffset'],16)
             self.assertEqual(candidate['view']['layout'],layout)
+
+    def test_calibration_is_explicit_and_requires_unique_candidate(self):
+        report=analyze_capture(self.path)
+        layout=calibration(report)
+        self.assertEqual(layout['view'],report['candidates'][0]['view'])
+        self.assertEqual(layout['worldVP'],report['candidates'][0]['worldVP'][0])
+        self.assertFalse(layout['autoSelected'])
+        for candidates in ([],report['candidates']*2):
+            with self.assertRaises(ValueError): calibration(dict(candidates=candidates))
 
     def test_similar_projection_and_view_without_world_vp_are_rejected(self):
         self.matrices[-1] = ((0,0,0,0),)*4

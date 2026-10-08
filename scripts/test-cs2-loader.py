@@ -101,7 +101,7 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(other.read_bytes(), b'Own test marker')
         self.assertEqual(self.target.read_bytes(), LOADER.read_bytes())
 
-    def preview_launch(self, probe=False, map_name='de_dust2', capture=False):
+    def preview_launch(self, probe=False, map_name='de_dust2', capture=False, camera=False):
         # Only invoke the launcher's default preview; never pass -Launch.
         def quote(value):
             return "'" + str(value).replace("'", "''") + "'"
@@ -110,9 +110,22 @@ class LoaderTests(unittest.TestCase):
             quote(ROOT / 'scripts/launch-cs2-lab.ps1') + ' -StateFile ' + quote(self.state) +
             ' -Map ' + quote(map_name) + (' -HostProbe' if probe else '') +
             (' -DepthCapture' if capture else '') +
+            (' -CameraRelay' if camera else '') +
             ' | ConvertTo-Json -Depth 5\n', encoding='utf8')
         return subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File', str(script)],
             capture_output=True, text=True, encoding='utf8', errors='replace', timeout=15)
+
+    def test_camera_relay_requires_private_calibration_and_is_explicit(self):
+        self.command('Install','-SteamLaunch')
+        missing=self.preview_launch(camera=True)
+        self.assertNotEqual(missing.returncode,0)
+        self.assertIn('private calibration',missing.stderr)
+        (self.candidate/'camera-layout.json').write_text('{}')
+        result=self.preview_launch(camera=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('-countercraft-camera-relay',json.loads(result.stdout)['Arguments'])
+        plain=self.preview_launch()
+        self.assertNotIn('-countercraft-camera-relay',json.loads(plain.stdout)['Arguments'])
 
     def test_host_probe_is_opt_in_and_preview_only(self):
         self.command('Install')

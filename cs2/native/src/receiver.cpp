@@ -7,6 +7,7 @@
 #include <functional>
 #include <cmath>
 #include <stdexcept>
+#include <deque>
 
 namespace cc {
 namespace {
@@ -79,7 +80,12 @@ public:
             std::array<uint8_t,1> next{}; receive(next,deadline,stop);
             if (next[0] == '\n') {
                 json reply = json::parse(line);
-                if (reply.at("v") != 1 || reply.at("type") == "error") throw std::runtime_error("Minecraft rejected control request");
+                if (reply.at("v") != 1) throw std::runtime_error("Minecraft control version mismatch");
+                if (reply.at("type") == "error") {
+                    auto reason=reply.value("message",std::string("unspecified"));
+                    for(auto& c:reason) if(static_cast<unsigned char>(c)<32)c=' ';
+                    throw std::runtime_error("Minecraft rejected control request: "+reason.substr(0,160));
+                }
                 return reply;
             }
             line += char(next[0]);
@@ -106,6 +112,16 @@ std::shared_ptr<const Frame> Receiver::latest() const {
     return latest_;
 }
 ReceiverStats Receiver::stats() const { std::lock_guard lock(mutex_); return stats_; }
+void Receiver::submit_camera(const HostCamera& camera,uint64_t sequence,int64_t captured_ns) {
+    if(!sequence || sequence>uint64_t(INT64_MAX) || captured_ns<=0 || !std::isfinite(camera.roll)
+        || !std::isfinite(camera.fov) || camera.fov<=0 || camera.fov>=180
+        || !std::isfinite(camera.pitch) || std::abs(camera.pitch)>90 || !std::isfinite(camera.yaw)
+        || std::abs(camera.roll)>.01 || !camera.right_handed)
+        throw std::runtime_error("Unsupported host pose for Minecraft camera relay");
+    for(auto n:camera.position)if(!std::isfinite(n))throw std::runtime_error("Invalid host camera position");
+    std::lock_guard lock(mutex_);
+    if(!camera_ || sequence>camera_->sequence) camera_=CameraUpdate{camera,sequence,captured_ns};
+}
 double Receiver::age_ms(const Frame& frame) const {
     return (double(monotonic_ns()) - double(clock_offset_.load()) - double(frame.metadata.captured_ns)) / 1e6;
 }
@@ -136,7 +152,46 @@ void Receiver::run() {
         { std::lock_guard lock(mutex_); stats_.connected = true; stats_.clock_uncertainty_ns = best_rtt / 2; }
         uint64_t sequence = 0;
         int64_t next_ping = monotonic_ns();
+        int64_t next_camera = monotonic_ns();
+        uint64_t sent_camera=0;
+        bool camera_active=false,anchored=false;
+        std::array<double,3> source_anchor{},guest_anchor{};
+        // A local lab alignment: first valid host eye anchors to the existing MC
+        // eye. Scale is the shared protocol's explicit 32 Source units per block.
+        // This does not move the MC player or supply collision/input semantics.
+        const auto initial_status=status;
+        struct ExpectedPose {uint64_t sequence;std::array<double,3> position;double yaw,pitch,fov;};
+        std::deque<ExpectedPose> expected_poses;
         auto heartbeat = [&] {
+            const auto now=monotonic_ns();
+            if(now>=next_camera) {
+                std::optional<CameraUpdate> update;
+                {std::lock_guard lock(mutex_);update=camera_;}
+                const bool fresh=update && now>=update->captured_ns && now-update->captured_ns<250'000'000;
+                if(fresh && update->sequence>sent_camera) {
+                    if(!anchored) {
+                        guest_anchor=initial_status.at("position").get<std::array<double,3>>();
+                        for(auto n:guest_anchor) if(!std::isfinite(n)) throw std::runtime_error("Invalid MC camera anchor");
+                        source_anchor=update->camera.position;anchored=true;
+                    }
+                    const auto& c=update->camera;
+                    const std::array<double,3> position{guest_anchor[0]+(c.position[0]-source_anchor[0])/32,
+                        guest_anchor[1]+(c.position[2]-source_anchor[2])/32,guest_anchor[2]-(c.position[1]-source_anchor[1])/32};
+                    const double yaw=std::remainder(-90-c.yaw,360.0);
+                    const auto ack=control.request({{"type","camera"},{"frame",update->sequence},
+                        {"position",position},{"rotation",{yaw,c.pitch,0}},{"fov",c.fov}},stop_);
+                    if(ack.at("type")!="ack" || ack.at("frame")!=update->sequence) throw std::runtime_error("Camera acknowledgement mismatch");
+                    sent_camera=update->sequence;camera_active=true;
+                    expected_poses.push_back({sent_camera,position,yaw,c.pitch,c.fov});
+                    if(expected_poses.size()>128)expected_poses.pop_front();
+                    {std::lock_guard lock(mutex_);++stats_.cameras_sent;}
+                } else if(!fresh && camera_active) {
+                    if(control.request({{"type","release"}},stop_).at("type")!="released") throw std::runtime_error("Camera release not acknowledged");
+                    camera_active=false;
+                    {std::lock_guard lock(mutex_);++stats_.camera_releases;}
+                }
+                next_camera=monotonic_ns()+33'000'000;
+            }
             if (monotonic_ns() >= next_ping) {
                 json heartbeat = control.request({{"type","ping"}},stop_);
                 if (heartbeat.at("offline") != true || heartbeat.at("epoch") != epoch
@@ -159,8 +214,23 @@ void Receiver::run() {
             binary.receive(frame->pixels,deadline,stop_,heartbeat);
             if (crc32(frame->pixels,crc32(metadata)) != h.crc) throw std::runtime_error("Frame CRC mismatch");
             validate_depth(frame->depth()); // On the worker; never scans on the host render thread.
+            bool rendered_camera=false;
+            if(frame->metadata.requested_frame>=0) {
+                const auto requested=uint64_t(frame->metadata.requested_frame);
+                for(const auto& expected:expected_poses) if(expected.sequence==requested) {
+                    const auto& actual=frame->metadata;
+                    for(size_t i=0;i<3;++i) if(std::abs(actual.position[i]-expected.position[i])>.001)
+                        throw std::runtime_error("Rendered MC position differs from relayed camera");
+                    if(std::abs(std::remainder(actual.rotation[0]-expected.yaw,360.))>.001
+                        || std::abs(actual.rotation[1]-expected.pitch)>.001 || std::abs(actual.rotation[2])>.001
+                        || std::abs(actual.fov-expected.fov)>.001)
+                        throw std::runtime_error("Rendered MC lens/orientation differs from relayed camera");
+                    rendered_camera=true;break;
+                }
+            }
             frame->received_ns = monotonic_ns(); sequence = h.sequence;
             std::lock_guard lock(mutex_); ++stats_.received;
+            if(rendered_camera)++stats_.cameras_rendered;
             if (std::abs(age_ms(*frame)) > 500) { ++stats_.stale; continue; }
             if (latest_ && latest_->header.sequence > last_observed_) ++stats_.replaced;
             latest_ = std::move(frame);

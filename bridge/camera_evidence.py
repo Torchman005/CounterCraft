@@ -161,12 +161,25 @@ def analyze_capture(path: str | Path):
         limitation='Math consistency is not scene/pose/timing verification; pre-draw depth is partial.')
 
 
+def calibration(report):
+    if len(report['candidates']) != 1:
+        raise ValueError('Calibration requires exactly one mathematical candidate')
+    candidate = report['candidates'][0]
+    return dict(schema=1, kind='public-binding-camera-layout', view=candidate['view'],
+                projection=candidate['projection'], worldVP=candidate['worldVP'][0],
+                relativeVP=candidate['relativeVP'][0], sceneVerified=False, autoSelected=False,
+                limitation='Local binding layout only; revalidate every matrix set and do not publish retail calibration.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('capture',type=Path)
     parser.add_argument('--output',type=Path)
+    parser.add_argument('--calibration',type=Path, help='Write a private native layout for per-snapshot validation')
     args = parser.parse_args()
     report = analyze_capture(args.capture)
+    if args.calibration:
+        args.calibration.write_text(json.dumps(calibration(report),indent=2)+'\n',encoding='utf8')
     text = json.dumps(report,indent=2,allow_nan=False)
     if args.output:
         args.output.write_text(text+'\n',encoding='utf8')

@@ -5,6 +5,7 @@ param(
     [string]$SteamExecutable,
     [switch]$HostProbe,
     [switch]$DepthCapture,
+    [switch]$CameraRelay,
     [ValidateRange(40,180)][int]$StartupTimeoutSeconds=120,
     [switch]$Launch
 )
@@ -19,6 +20,12 @@ if ((Get-FileHash -LiteralPath $state.Target -Algorithm SHA256).Hash.ToLowerInva
 $launchArguments = @('-insecure','-countercraft-lab','-countercraft-preview','-console','+sv_lan','1','+map',$Map)
 if ($HostProbe -or $DepthCapture) { $launchArguments += '-countercraft-host-probe' }
 if ($DepthCapture) { $launchArguments += '-countercraft-depth-capture' }
+if ($CameraRelay) {
+    if (-not (Test-Path -LiteralPath (Join-Path $candidate 'camera-layout.json') -PathType Leaf)) {
+        throw 'Camera relay requires a private calibration in the candidate directory.'
+    }
+    $launchArguments += '-countercraft-camera-relay'
+}
 $steamArguments = @('-applaunch','730') + $launchArguments
 $steamProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'steam.exe'")
 if (-not $SteamExecutable -and $steamProcesses.Count -eq 1) { $SteamExecutable = $steamProcesses[0].ExecutablePath }

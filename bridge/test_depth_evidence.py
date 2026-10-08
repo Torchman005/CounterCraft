@@ -6,6 +6,7 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+import shutil
 
 from bridge.camera_evidence import multiply
 from bridge.depth_evidence import Evidence, compare
@@ -91,6 +92,52 @@ class DepthEvidenceTests(unittest.TestCase):
             path.write_bytes(changed)
             with self.assertRaises(ValueError):
                 Evidence.read(self.root/'a'/'capture.json')
+
+    def boundary_fixture(self):
+        camera = self.root/'a'/'capture.json'
+        original = json.loads(camera.read_text())
+        original.update(frame=10, candidateId=1, request=1, candidateDraw=64,
+                        outputSize=[160, 100], trigger='viewport-transitions', viewportTransitions=0)
+        original['depth'].update(samples=4, quality=0, sourceFormat=44)
+        camera.write_text(json.dumps(original))
+        boundary_dir = self.root/'boundary'
+        shutil.copytree(camera.parent, boundary_dir)
+        boundary = boundary_dir/'capture.json'
+        data = json.loads(camera.read_text())
+        data.update(candidateDraw=408, captureId='boundary', viewportTransitions=1,
+                    bindingTiming='current-draw-after-viewport-change-or-draw64',
+                    previousViewport=data['viewports'][0])
+        data['viewports'] = [[0, 0, 160, 100, 0, .1]]
+        # Boundary CBs deliberately cannot provide a world camera.
+        data['constantBuffers'] = []
+        boundary.write_text(json.dumps(data))
+        return camera, boundary, data
+
+    def test_boundary_uses_earlier_same_frame_camera_and_previous_range(self):
+        camera, boundary, _ = self.boundary_fixture()
+        with self.assertRaises(ValueError): Evidence.read(boundary)
+        paired = Evidence.read(boundary, camera)
+        self.assertEqual(paired.candidate['viewport'][5], .95)
+        self.assertEqual(paired.camera_capture_id, 'a')
+        report = compare(self.a, paired, raw_bounds=(0, .95))
+        self.assertEqual(report['withinFraction'], 1)
+        self.assertEqual(report['targetCameraCapture'], 'a')
+
+    def test_boundary_rejects_cross_frame_resource_request_and_late_pass(self):
+        camera, boundary, data = self.boundary_fixture()
+        for key, value in [('frame', 11), ('candidateId', 2), ('request', 2),
+                           ('viewportTransitions', 2), ('candidateDraw', 63),
+                           ('outputSize', [80, 50]), ('previousViewport', [0, 0, 160, 100, 0, 1])]:
+            bad = data | {key: value}
+            boundary.write_text(json.dumps(bad))
+            with self.assertRaises(ValueError): Evidence.read(boundary, camera)
+
+    def test_boundary_rejects_matching_ids_in_another_session(self):
+        camera, boundary, _ = self.boundary_fixture()
+        other = self.root/'other-session'/'a'
+        shutil.copytree(camera.parent, other)
+        with self.assertRaisesRegex(ValueError, 'same capture session'):
+            Evidence.read(boundary, other/'capture.json')
 
 
 if __name__ == '__main__':

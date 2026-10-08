@@ -829,3 +829,34 @@ launch, in-game test, rendering bridge, or complete port has been performed.
   .local/cs2-viewport-boundary-state.json; universal-modder backup diff added/removed/
   changed are all empty. Captures and screenshots remain ignored.
 - Source publish check: 94 files, zero failures; reviewed MODLOG path warning only.
+
+## Native camera decoding and live relay checkpoint (2026-10-08)
+
+- Added same-session/frame/resource/request boundary-camera pairing; rejects late
+  transitions and shape/range mismatches. Real capture2(camera1)->capture5(camera4)
+  compares 74,847 points, 99.884% within 1%; private paired-boundary-evidence.json.
+- Added explicit private layout export and native bounded matrix validation.
+  Both full and rotation-only P*V products are checked every snapshot; 16 actual
+  private captures agree with Python position/yaw/pitch within 1e-8.
+- Added three-slot asynchronous camera-only GPU readback and opt-in CameraRelay.
+  Buffers are owned, bound-range metadata preserved, and host mutation/release
+  after enqueue cannot alter snapshots. Decode/network workers stay off render.
+  Latest mailbox and 250ms stale release; zero roll only; initial eye alignment
+  uses the shared 32-unit convention and does not move the simulated guest player.
+- Independent loopback tests verify mapping, acknowledgement mismatch, stale
+  release while binary input is blocked, actual render pose agreement and a
+  deliberately wrong render pose. 13 CTest suites passed (12 socket cases), 40
+  Python tests passed; launcher fixtures 28 passed including opt-in calibration.
+- Real Steam offline PID45060/parent16232, isolated MC PID43144: 4910 acked poses,
+  3308 matching actual rendered frames, 3897 received/3775 uploaded, nine releases.
+  A later MC control rejection ended transport. Previous generic error did not
+  identify why; distance limit is only a hypothesis. Detailed error now preserved.
+  Initial host feed decoded123391/rejected12402, busy10655, queued135798; subsequent
+  30Hz throttle passed tests but has not been tested in CS2 yet. No FPS claim.
+- Exact owned CS2 exit and state-file restore succeeded, game backup diff empty.
+  Runtimes/pending=0, resourceFailures=0; D3D11 teardown warning1929 unattributed.
+  MC status confirmed active=false, stream running=false, leasedBuffers=0. Both
+  game processes are now absent on reinspection. Private assets remain ignored.
+- Current host1680x1050/guest1280x720 aspect mismatch, draw64 identity under all
+  game states, rejection cause/reconnect, continuous world depth pairing, latency,
+  input/player/collision/chunk synchronization and playable fusion remain open.

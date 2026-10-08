@@ -29,15 +29,22 @@ class Evidence:
     width: int
     height: int
     pixels: array
+    camera_capture_id: int | str | None = None
 
     @classmethod
-    def read(cls, path: Path):
+    def read(cls, path: Path, camera_path: Path | None = None):
         path = Path(path).resolve()
-        analysis = analyze_capture(path)
+        camera_path = Path(camera_path).resolve() if camera_path else path
+        analysis = analyze_capture(camera_path)
         if len(analysis['candidates']) != 1:
             raise ValueError('Exactly one mathematical camera candidate required')
+        if path.stat().st_size > 65536:
+            raise ValueError('Depth manifest exceeds 64KiB')
         metadata = json.loads(path.read_text(encoding='utf8'))
         candidate = analysis['candidates'][0]
+        camera_metadata = json.loads(camera_path.read_text(encoding='utf8'))
+        if camera_path != path:
+            validate_boundary_pair(path, metadata, camera_path, camera_metadata, candidate)
         depth = metadata.get('depth', {})
         size = depth.get('size')
         if (not isinstance(size, list) or len(size) != 2
@@ -60,10 +67,11 @@ class Evidence:
             raise ValueError('Nonfinite/out-of-range depth data')
         if any(pixels[i] > pixels[i+1] for i in range(0, len(pixels), 2)):
             raise ValueError('Reversed min/max samples')
-        matrices = bound_matrices(path.parent, metadata['constantBuffers'])
+        matrices = bound_matrices(camera_path.parent, camera_metadata['constantBuffers'])
         def matrix(name):
             return next(m.values for m in matrices if m.location() == candidate[name])
-        return cls(metadata, candidate, matrix('view'), matrix('projection'), width, height, pixels)
+        return cls(metadata, candidate, matrix('view'), matrix('projection'), width, height, pixels,
+                   camera_metadata.get('captureId'))
 
     def depth(self, x, y, bounds, max_spread):
         index = (y*self.width+x)*2
@@ -87,6 +95,39 @@ class Evidence:
                (1-(y+.5)/self.height*2)*clip_w/p[1][1]-p[1][2]*z/p[1][1], z)
         # Rigid inverse: R^T * (eye - translation).
         return tuple(sum(v[i][j]*(eye[i]-v[i][3]) for i in range(3)) for j in range(3))+(1,)
+
+
+def validate_boundary_pair(depth_path, depth, camera_path, camera, candidate):
+    # Session scope comes from the private writer's directory, never a reused
+    # candidateId/frame alone. Both paths must resolve to sibling capture folders.
+    if depth_path.parent.parent != camera_path.parent.parent:
+        raise ValueError('Camera and depth must belong to the same capture session')
+    for metadata in (depth, camera):
+        if metadata.get('schema') != 1 or metadata.get('timing') != 'before-current-draw':
+            raise ValueError('Unsupported boundary timing/schema')
+        for key in ('frame', 'candidateId', 'request', 'candidateDraw'):
+            if type(metadata.get(key)) is not int or metadata[key] <= 0:
+                raise ValueError('Manual boundary identity must be explicit')
+    for key in ('frame', 'candidateId', 'request', 'outputSize'):
+        if depth.get(key) != camera.get(key):
+            raise ValueError('Camera/depth frame, resource, request or output mismatch')
+    if (camera['candidateDraw'] >= depth['candidateDraw']
+            or camera.get('trigger') != 'viewport-transitions'
+            or camera.get('viewportTransitions') != 0
+            or depth.get('trigger') != 'viewport-transitions'
+            or depth.get('viewportTransitions') != 1
+            or depth.get('bindingTiming') != 'current-draw-after-viewport-change-or-draw64'):
+        raise ValueError('Require earlier camera context and the first viewport boundary')
+    previous, current = depth.get('previousViewport'), depth.get('viewports')
+    if (previous != candidate['viewport'] or not isinstance(current, list) or len(current) != 1
+            or len(current[0]) != 6 or current[0][:4] != previous[:4]
+            or any(type(n) not in (int, float) or not math.isfinite(n) for n in current[0])
+            or not 0 <= current[0][4] < current[0][5] <= 1
+            or current[0][4:] == previous[4:]):
+        raise ValueError('Boundary must change depth range while preserving viewport rectangle')
+    for key in ('size', 'samples', 'quality', 'sourceFormat'):
+        if key not in depth.get('depth', {}) or depth['depth'][key] != camera.get('depth', {}).get(key):
+            raise ValueError('Camera/depth texture description mismatch')
 
 
 def compare(source: Evidence, target: Evidence, *, raw_bounds, stride=8,
@@ -137,6 +178,7 @@ def compare(source: Evidence, target: Evidence, *, raw_bounds, stride=8,
                    else 'targetCloser' if error > 0 else 'targetFarther'] += 1
     errors.sort()
     return dict(sourceCapture=source.metadata.get('captureId'), targetCapture=target.metadata.get('captureId'),
+                sourceCameraCapture=source.camera_capture_id, targetCameraCapture=target.camera_capture_id,
                 rawInterval=list(raw_bounds), stride=stride, maxMsaaSpread=max_spread,
                 relativeTolerance=relative_tolerance, counts=counts,
                 absoluteRelativeError={name: errors[round((len(errors)-1)*q)] if errors else None
@@ -151,13 +193,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
     parser.add_argument('target', type=Path)
+    parser.add_argument('--source-camera', type=Path, help='Earlier same-frame camera capture for source boundary depth')
+    parser.add_argument('--target-camera', type=Path, help='Earlier same-frame camera capture for target boundary depth')
     parser.add_argument('--raw-interval', type=float, nargs=2, required=True, metavar=('MIN', 'MAX'))
     parser.add_argument('--stride', type=int, default=8)
     parser.add_argument('--max-msaa-spread', type=float, default=.001)
     parser.add_argument('--relative-tolerance', type=float, default=.01)
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
-    report = compare(Evidence.read(args.source), Evidence.read(args.target), raw_bounds=args.raw_interval,
+    report = compare(Evidence.read(args.source, args.source_camera), Evidence.read(args.target, args.target_camera), raw_bounds=args.raw_interval,
                      stride=args.stride, max_spread=args.max_msaa_spread, relative_tolerance=args.relative_tolerance)
     text = json.dumps(report, indent=2, allow_nan=False)+'\n'
     if args.output:

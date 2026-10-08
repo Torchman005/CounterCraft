@@ -3,6 +3,7 @@
 #include "offline_guard.hpp"
 #include "host_probe.hpp"
 #include "host_capture.hpp"
+#include "host_camera_feed.hpp"
 #include <reshade.hpp>
 #include <shellapi.h>
 #include <json.hpp>
@@ -56,6 +57,7 @@ struct AddonState {
     cc::Receiver receiver;
     cc::HostProbe host_probe;
     cc::HostCapture host_capture;
+    cc::HostCameraFeed camera_feed;
     bool preview{};
     std::mutex runtimes_mutex, report_mutex;
     std::unordered_map<api::effect_runtime*,RuntimeTextures> runtimes;
@@ -65,8 +67,8 @@ struct AddonState {
     bool ending{};
     std::thread reporter;
 
-    AddonState(bool p, bool probe, bool capture, const std::filesystem::path& path)
-        : host_probe(probe), host_capture(capture,path), preview(p) {}
+    AddonState(bool p, bool probe, bool capture, bool camera, const std::filesystem::path& path)
+        : host_probe(probe), host_capture(capture,path), camera_feed(camera,path,receiver), preview(p) {}
     void log_report(bool final) {
         const auto status=receiver.stats();
         const auto start=std::chrono::steady_clock::now();
@@ -76,7 +78,9 @@ struct AddonState {
             {"resourceFailures",failures.load()},{"received",status.received},
             {"connected",status.connected},{"failure",status.failure},
             {"hostCameraDepthVerified",false},{"hostDepthProbe",host_probe.report()},
-            {"hostDepthCapture",host_capture.report()}};
+            {"hostDepthCapture",host_capture.report()},{"hostCameraFeed",camera_feed.report()},
+            {"camerasSent",status.cameras_sent},{"cameraReleases",status.camera_releases},
+            {"cameraFramesMatched",status.cameras_rendered}};
         // Includes snapshot and JSON tree construction, excludes dump/disk logging.
         report["reportBuildUs"]=std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now()-start).count();
@@ -220,6 +224,7 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon, HMODULE reshade_m
         const bool capture=cc::has_argument(arguments,L"-countercraft-depth-capture");
         state = new AddonState(cc::has_argument(arguments,L"-countercraft-preview"),
             capture || cc::has_argument(arguments,L"-countercraft-host-probe"),capture,
+            cc::has_argument(arguments,L"-countercraft-camera-relay"),
             std::filesystem::path(module_path).parent_path());
         reshade::register_event<reshade::addon_event::init_effect_runtime>(init_runtime);
         reshade::register_event<reshade::addon_event::destroy_effect_runtime>(destroy_runtime);
@@ -227,6 +232,7 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon, HMODULE reshade_m
         reshade::register_event<reshade::addon_event::reshade_begin_effects>(begin_effects);
         state->host_probe.install();
         state->host_capture.install();
+        state->camera_feed.install();
         state->reporter = std::thread(&AddonState::report_loop,state);
         reshade::log::message(reshade::log::level::info,"CounterCraft upload candidate: offline guard passed. Host camera/depth unverified.");
         return true;
@@ -239,6 +245,7 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon, HMODULE reshade_m
 extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon, HMODULE reshade_module) {
     if (!state) return;
     state->host_capture.uninstall();
+    state->camera_feed.uninstall();
     state->host_probe.uninstall();
     reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(begin_effects);
     reshade::unregister_event<reshade::addon_event::reshade_reloaded_effects>(reload_effects);

@@ -22,9 +22,12 @@ CLOCK_OFFSET = 9_000_000_000_000
 PROBE = None
 
 
-def make_packet(sequence=1, *, age_ns=0, session=SESSION, depth=None):
+def make_packet(sequence=1, *, age_ns=0, session=SESSION, depth=None, camera=None):
     base = copy.deepcopy(FrameReader(Bytes(packet()), SESSION, 7).read().metadata)
     base["monotonicNanos"] = time.perf_counter_ns() + CLOCK_OFFSET - age_ns
+    if camera is not None:
+        base['requestedFrame']=camera['frame']
+        base['camera']={key:camera[key] for key in ('position','rotation','fov')}
     data = packet(sequence, base, session)
     if depth is not None:
         fields = list(HEADER.unpack(data[:64]))
@@ -47,6 +50,9 @@ class Fixture:
         self.scenario, self.offline = scenario, offline
         self.closed = threading.Event()
         self.errors = []
+        self.cameras = []
+        self.releases = 0
+        self.camera_arrived = threading.Event()
         self.control = self.listen()
         self.binary = self.listen()
         self.port = self.control.getsockname()[1]
@@ -74,7 +80,7 @@ class Fixture:
                     elif kind == "ping":
                         pings += 1
                         response = {"type":"status", "serverMonotonicNanos":time.perf_counter_ns()+CLOCK_OFFSET,
-                                    "offline":self.offline, "epoch":7, "stream":{"running":True}}
+                                    "offline":self.offline, "epoch":7, "position":[10,64,20], "stream":{"running":True}}
                         if self.scenario == "epoch" and pings > 6: response["epoch"] = 8
                         if self.scenario == "control-eof" and pings > 6: return
                     elif kind == "stream-start":
@@ -82,6 +88,13 @@ class Fixture:
                                     "session":str(SESSION), "epoch":7}
                         t = threading.Thread(target=self.send_frames, daemon=True)
                         self.threads.append(t); t.start()
+                    elif kind == 'camera':
+                        self.cameras.append(message)
+                        self.camera_arrived.set()
+                        response = dict(type='ack',frame=message['frame']+(1 if self.scenario=='camera-bad-ack' else 0))
+                    elif kind == 'release':
+                        self.releases += 1
+                        response = dict(type='released')
                     else: raise AssertionError(kind)
                     control.sendall((json.dumps({"v":1, **response})+"\n").encode())
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError): pass  # Expected cancellation.
@@ -93,7 +106,12 @@ class Fixture:
             with self.binary.accept()[0] as binary:
                 binary.settimeout(3)
                 binary.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                if self.scenario == "blocked":
+                if self.scenario in ('render-camera','wrong-render-camera'):
+                    if not self.camera_arrived.wait(2): raise AssertionError('No relayed camera')
+                    camera=copy.deepcopy(self.cameras[-1])
+                    if self.scenario=='wrong-render-camera': camera['position'][0]+=1
+                    binary.sendall(make_packet(camera=camera))
+                elif self.scenario == "blocked":
                     binary.sendall(b"CCF")  # Cancellation in the middle of a header.
                 else:
                     data = make_packet()
@@ -124,6 +142,48 @@ class Fixture:
 
 
 class NativeSocketTests(unittest.TestCase):
+    def test_rendered_camera_is_checked_independently_of_ack(self):
+        for scenario in ('render-camera','wrong-render-camera'):
+            fixture=Fixture(scenario);fixture.start()
+            try:
+                result=subprocess.run([str(PROBE),str(fixture.port),'.8','camera'],capture_output=True,text=True,timeout=5,check=True)
+                report=json.loads(result.stdout)
+                if scenario=='render-camera':
+                    self.assertEqual(report['cameraFramesMatched'],1)
+                    self.assertEqual(report['failure'],'')
+                else:
+                    self.assertIn('Rendered MC position',report['failure'])
+                    self.assertEqual(report['cameraFramesMatched'],0)
+                    self.assertTrue(report['cleared'])
+            finally: fixture.close()
+
+    def test_camera_mapping_and_stale_release_while_waiting_for_frames(self):
+        fixture = Fixture('blocked'); fixture.start()
+        try:
+            result = subprocess.run([str(PROBE),str(fixture.port),'.8','camera'],capture_output=True,text=True,timeout=5,check=True)
+            report = json.loads(result.stdout)
+            self.assertEqual(report['failure'],'')
+            self.assertEqual(report['camerasSent'],2)
+            self.assertEqual(report['cameraReleases'],1)
+            self.assertEqual([m['frame'] for m in fixture.cameras],[1,2])
+            self.assertEqual(fixture.cameras[0]['position'],[10,64,20])
+            self.assertEqual(fixture.cameras[1]['position'],[11,66,22])
+            self.assertEqual(fixture.cameras[0]['rotation'],[-90,10,0])
+            self.assertEqual(fixture.cameras[1]['rotation'],[-180,-20,0])
+            self.assertEqual(fixture.cameras[1]['fov'],80)
+            self.assertEqual(fixture.releases,1)
+        finally: fixture.close()
+
+    def test_camera_ack_mismatch_terminates_control(self):
+        fixture = Fixture('camera-bad-ack'); fixture.start()
+        try:
+            result = subprocess.run([str(PROBE),str(fixture.port),'.8','camera'],capture_output=True,text=True,timeout=5,check=True)
+            report = json.loads(result.stdout)
+            self.assertIn('acknowledgement mismatch',report['failure'])
+            self.assertEqual(report['camerasSent'],0)
+            self.assertTrue(report['cleared'])
+        finally: fixture.close()
+
     def run_case(self, name, seconds=.8, offline=True):
         fixture = Fixture(name, offline); fixture.start()
         try:
