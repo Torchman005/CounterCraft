@@ -44,13 +44,15 @@ PerformanceMode=0
 [INPUT]
 KeyOverlay=36,0,0,0
 "@ | Set-Content -LiteralPath (Join-Path $Destination 'ReShade.ini') -Encoding utf8
-$targets = foreach ($name in @('dxgi.dll')) {
+$targets = foreach ($name in @('dxgi.dll', 'ReShade.ini')) {
     $target = Join-Path $gameDirectory $name
     [pscustomobject]@{
         Path = $target
         Exists = Test-Path -LiteralPath $target
         CurrentSha256 = if (Test-Path -LiteralPath $target -PathType Leaf) { (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash } else { $null }
-        Source = if (Test-Path -LiteralPath $runtime -PathType Leaf) { $runtime } else { 'Not supplied: official ReShade 6.8.0 x64 full add-on loader required' }
+        Source = if($name -eq 'ReShade.ini') { 'Generated [INSTALL] BasePath bootstrap with -SteamLaunch' }
+            elseif (Test-Path -LiteralPath $runtime -PathType Leaf) { $runtime }
+            else { 'Not supplied: official ReShade 6.8.0 x64 full add-on loader required' }
     }
 }
 $plan = [pscustomobject]@{
@@ -58,16 +60,18 @@ $plan = [pscustomobject]@{
     GameFilesWritten = $false
     GameExecutablePresent = $gameExecutablePresent
     Executable = $cs2
+    LaunchRoute = 'Steam'
+    SteamAppId = 730
     Arguments = @('-insecure', '-countercraft-lab', '-countercraft-preview', '-console', '+sv_lan', '1', '+map', 'de_dust2')
     OptionalHostProbeArgument = '-countercraft-host-probe'
-    Environment = @{ RESHADE_BASE_PATH_OVERRIDE = $Destination }
+    SteamBootstrap = @{ Path=(Join-Path $gameDirectory 'ReShade.ini'); Section='INSTALL'; BasePath=$Destination; PreparedOnly=$true }
     CandidateAddon = Join-Path $Destination 'CounterCraftProbe.addon64'
     CandidateSha256 = (Get-FileHash -LiteralPath (Join-Path $Destination 'CounterCraftProbe.addon64') -Algorithm SHA256).Hash
     Targets = @($targets)
     BackupDirectory = Join-Path $projectRoot '.local\cs2-loader-backup'
-    InstallPolicy = 'Requires specific approval. Stop CS2; snapshot target states; refuse an existing loader/config unless reviewed; verify official loader provenance before copying.'
-    RestorePolicy = 'Stop CS2; remove only the newly installed, hash-matched dxgi.dll. Keep backup/evidence. Restore before normal CS2 use. Config/logs/cache stay outside the game via the official per-process base-path override.'
-    VerifiedScope = 'Offline protocol/socket/GPU/projection/resource-inventory oracles and addon refusal. Upload/FX/pause were verified in CS2 at d1be2d9; the new opt-in host observer requires fresh real-game verification after reinstall. Host camera/depth/world fusion and gameplay remain unverified.'
+    InstallPolicy = 'Stop CS2; snapshot target states; verify official loader provenance. -SteamLaunch creates only dxgi.dll and a hash-checked ReShade.ini BasePath bootstrap; refuse existing loader/config.'
+    RestorePolicy = 'Stop CS2; remove only the newly installed hash-matched loader/bootstrap. Keep backup/evidence. Config/logs/cache stay under the candidate via official INI BasePath; restore before normal use.'
+    VerifiedScope = 'Offline protocol/socket/GPU/projection/resource-inventory oracles and addon refusal. Upload/FX/pause at d1be2d9; read-only host metadata callbacks verified with Steam-launched local Dust2 on 2026-10-08. Candidate identity, full coverage, performance, camera/depth fusion and gameplay remain unverified.'
 }
 $plan | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $Destination 'install-plan.json') -Encoding utf8
 $plan | ConvertTo-Json -Depth 6

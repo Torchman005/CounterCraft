@@ -2,6 +2,77 @@
 
 Started: 2026-10-06
 
+## Steam launch and actual host-depth observation after reinstall (2026-10-08)
+
+- User confirmed CS2 download finished and requested continuation of the approved
+  offline bridge work. Running Steam is now D:\steam1\Steam.exe; its library
+  manifest resolves CS2 to D:\steam1\steamapps\common\Counter-Strike Global
+  Offensive, build 25738536, StateFlags=4, downloaded bytes complete. Old D:\steam
+  install is absent. No CS2/Java process, existing dxgi.dll or game ReShade.ini.
+- Regenerated the a36b713 host-probe candidate plan for the exact new installation.
+  New pre-loader snapshot: countercraft-cs2-reinstall-before-probe/
+  20261008-080527.zip (101 files/443.0 MB). Do not reuse the old install snapshot.
+  Initial direct launch exited with Steam IPC code 12; Steam replacement children
+  had only -steam and were not adopted as lab successes. The physical-Escape
+  interruption was respected, and owned processes/files were closed/restored.
+- User confirmed normal CS2 startup, requested retry, then provided Launcher
+  Error #720: local Steam client connection failed when cs2.exe was launched
+  directly. Adding -steam did not solve it. No ownership/security checks were
+  changed. User's steam_appid.txt and two prior crash dumps were already present
+  before the new test; preserve them. New current-state backup:
+  countercraft-cs2-retry-clean/20261008-081854.zip (104 files/444.3 MB).
+- Verified ReShade v6.8.0 upstream dll_main.cpp get_base_path and ini_file.cpp
+  global_config via the GitHub contents API; raw-file HTTPS failed on this machine.
+  Official [INSTALL] BasePath takes precedence and selects the isolated config/log
+  directory. Changed the route to Steam -applaunch 730, with a temporary small
+  ReShade.ini bootstrap in addition to pinned dxgi.dll. Both exact paths/hashes
+  are recorded; exclusive creation, conflict refusal and all-files-before-delete
+  validation retain external changes. Old one-file states remain restorable.
+  Original PCL/OptiFine and Steam authentication/settings are untouched.
+- Steam client PID 18224 created CS2 PID 32048 with exact executable/new path and
+  -steam -insecure -countercraft-lab -countercraft-preview -console +sv_lan 1
+  +map de_dust2 -countercraft-host-probe. D3D11 API 45056, RTX 4060 Laptop driver
+  617.14, 1920x1080; effect compiled. Computer Use inspected local Dust2 team
+  selection, bot introduction and first-person T spawn. A team click intended as
+  CT resulted in T selection; followed actual state and made no gameplay claim.
+- 143 JSON reports, 137 with candidates. Screen-size candidate 1 is four-sample
+  D24S8 and has 13..1297 recorded direct/indirect draw commands in observed active
+  intervals. Single-sample screen-size D24S8 and 4352x5248 D16, 960x540/480x270
+  D24S8 also appear. Last clear 1 is evidence only, not proof of depth convention.
+  Final missed/deferred/overflow=20/0/0; knownLossFree=false. No full coverage or
+  performance baseline claim. AutoSelected and cameraDepthVerified remain false.
+- Existing base-view classification does not normalize D3D11 default level/layer
+  counts or multisample view shape. Its nonBaseViewDraws is not proof of actual
+  non-base subresource use; document and verify actual descriptions next. No
+  host pixels, constant-buffer content or scene-camera data were read. MC was not
+  running, so receiver socket timeout is expected; received/uploads=0 and
+  resourceFailures=0. This test verifies metadata callbacks, not world fusion.
+- Gracefully closed exact owned PID 32048. Runtime count became zero, add-on
+  unregistered, ReShade finished exiting. Reference-count warning 1782 recurred;
+  previous loader-only baseline still does not identify its cause or exclude a
+  leak. Restored both files using state steamtest-afa810002973449891e0f7acc5fc3b69.
+  No CS2 process, dxgi.dll or game ReShade.ini remains. Backup comparison against
+  the 08:18 current-state ZIP: no added, removed or changed files.
+- Launch scripts now use Steam, validate its exact child path/parent/arguments,
+  reject unexpected launch options and record private lab receipts. A verified
+  process receipt is not map/runtime success. Vanilla offline launcher also uses
+  Steam and refuses residual lab files. Defaults still require -Cs2Root after a
+  move/reinstall. No raw console identifiers, imagery, game files or binaries ship.
+- Seven native CTest suites passed (8.87s). Twenty workflow fixtures passed
+  (110.336s), then six mock-launch cases passed after adding the two vanilla
+  cases (25.507s): 22 distinct checks. The first fixture run correctly rejected
+  candidates nested inside its fake game root; separated the fixture roots, then
+  all checks passed. Mocks shadow all process operations and never launch games.
+  Java/native source unchanged. Eighteen Python regressions passed (0.761s), all
+  ten PowerShell scripts parsed, Python fixture syntax and whitespace checks
+  passed. Preparation rerun after listing both targets passed and confirmed
+  preview-only BasePath with no game writes. Staged-source publication check is
+  on the 73-file source-only index snapshot found zero failures and one known
+  absolute-user-path warning in this journal. Recovery provenance is intentional;
+  raw logs, SDK/loader binaries, game assets and saves are excluded. Game comparison
+  used the actual win64 install. Source tree is ready for the requested checkpoint
+  commit/push; next stage is view normalization and verified depth/camera identity.
+
 ## Host depth reconnaissance without CS2 (2026-10-08)
 
 - User reported accidentally deleting CS2 and is downloading it again. Continue

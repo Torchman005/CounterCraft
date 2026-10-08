@@ -3,9 +3,9 @@
 This is a verified independent renderer plus a **ReShade upload/diagnostic inset
 verified in actual offline CS2**. It is not a playable Minecraft port or verified
 CS2 scene compositor. The original OptiFine instance is not used. The temporary
-game-folder loader was restored after testing on 2026-10-07. The opt-in host-depth
-observer added on 2026-10-08 is compiled/offline-tested and still awaits actual
-CS2 verification after the user's reinstall.
+game-folder loader was restored after each test. The opt-in host-depth observer
+produced real resource/draw/clear metadata in Steam-launched offline Dust2 on
+2026-10-08. Camera/depth identity, full event coverage and overhead remain unverified.
 
 ## Build
 
@@ -114,12 +114,14 @@ resource-lifetime checks remain open.
 
 Run from PowerShell 7.4+ with Python 3 and a completed native build. Close CS2,
 review the plan and obtain approval for game-folder installation. This project's
-local offline test was explicitly authorized; a new installation needs its own
-review. The preparation command writes only outside the game directory:
+local offline test and restoration were explicitly authorized. The preparation
+command writes only outside the game directory. Pass the actual current install
+path after a reinstall rather than relying on an older default:
 
 ```powershell
 ./scripts/fetch-reshade-runtime.ps1
-./scripts/prepare-cs2-lab.ps1
+$cs2Root = '<absolute current CS2 install directory>'
+./scripts/prepare-cs2-lab.ps1 -Cs2Root $cs2Root
 Get-Content .local/cs2-lab-candidate/install-plan.json
 ./scripts/manage-cs2-loader.ps1  # preview only
 ```
@@ -137,33 +139,44 @@ from its checkout if `um` is not on PATH. Set `$snapshot` to the resulting ZIP:
 
 ```powershell
 $snapshot = '<absolute path to completed backup ZIP>'
-$installed = ./scripts/manage-cs2-loader.ps1 -Mode Install -BackupSnapshot $snapshot
+$installed = ./scripts/manage-cs2-loader.ps1 -Mode Install -SteamLaunch -Cs2Root $cs2Root -BackupSnapshot $snapshot
 $installed.StateFile  # keep this exact path for restore
 ./scripts/launch-cs2-lab.ps1 -StateFile $installed.StateFile  # preview
 ./scripts/launch-cs2-lab.ps1 -StateFile $installed.StateFile -Launch
 # Close that offline CS2 session normally before restoring:
-./scripts/manage-cs2-loader.ps1 -Mode Restore -StateFile $installed.StateFile
+./scripts/manage-cs2-loader.ps1 -Mode Restore -Cs2Root $cs2Root -StateFile $installed.StateFile
 ```
 
 For another game location, pass the same `-Cs2Root` to preparation, install and
 restore. Start the installed Steam client first; authentication is done by the
-user. The launcher always uses `-insecure -countercraft-lab -countercraft-preview
--console +sv_lan 1 +map de_dust2`; `-Map` accepts a local map name. Process-local
-`RESHADE_BASE_PATH_OVERRIDE` keeps config, effects, logs and cache under the
-candidate directory. Console output also remains there and may contain private
-Steam identifiers; do not publish raw logs.
+user. The launcher calls that running client's executable with `-applaunch 730`
+and `-insecure -countercraft-lab -countercraft-preview -console +sv_lan 1 +map
+de_dust2`; `-Map` accepts a local map name. It never starts `cs2.exe` directly.
+Direct startup after this reinstall produced Launcher Error #720 even with
+`-steam`. It records a private receipt and requires the exact game path, Steam
+parent PID and fixed arguments; unexpected user launch options cause refusal.
+`ProcessIdentityVerified` only confirms startup identity, not map or rendering
+success. No Steam settings, authentication, app ID or ownership files are changed.
 
-Only `game/bin/win64/dxgi.dll` is installed. Existing loaders or game-folder
-`ReShade.ini` cause refusal. The backup source and candidate/loader hashes must
-match. Install uses exclusive file creation and records state before writing;
+With `-SteamLaunch`, only `game/bin/win64/dxgi.dll` and a small `ReShade.ini`
+bootstrap are installed. The official ReShade 6.8.0 `[INSTALL] BasePath` redirects
+to the isolated candidate; its full config, add-ons, effects, logs and caches stay
+there. A running Steam client cannot inherit a newly invoked helper's environment,
+so the previous process-local override route is not used. Existing loaders or
+game-folder `ReShade.ini` cause refusal. Both files' hashes and target paths are
+recorded. Install uses exclusive file creation and records state before writing;
 a failed partial install stays `Prepared` for inspection. Restore removes only
-the exact new hash-matched loader, retaining evidence. A modified target or
-manipulated target path causes refusal. Restore before normal CS2 use.
+the exact new hash-matched loader/bootstrap, retaining evidence. Both are validated
+before removing either; a modified file or manipulated path preserves both for
+inspection. Old one-file installation states remain restorable. Restore before
+normal CS2 use.
 
 The 2026-10-07 restore was verified against the universal-modder snapshot: no
-added, removed or changed files. The fixture suite currently passes ten tests covering
-install/restore, opt-in launch previews and preparation with a missing game.
-It never launches a game:
+added, removed or changed files. The 2026-10-08 Steam-session restore also matched
+its current-state backup exactly. Fixtures cover old/new install/restore,
+conflicting or modified files, missing-game preparation and mocked Steam child
+verification, including wrong parent, extra arguments and early exit.
+Process operations in launch fixtures are replaced; tests never launch a game:
 
 ```powershell
 python scripts/test-cs2-loader.py --loader .local/reshade-runtime/ReShade64.dll -v
@@ -188,7 +201,16 @@ projection contract, explicit unit conversion and remaining actual-game oracles.
 
 ## Still to prove in the actual offline game
 
-New host-observer callback coverage/overhead, resize/world-switch/resource lifetime,
+The actual 2026-10-08 session produced 143 reports (137 with candidates), runtime
+count returned to zero and the game remained responsive. Its screen-size D24S8
+candidate was four-sample MSAA; single-sample screen-size D24S8 and other-size D16/
+D24S8 candidates were also present. Final missed/deferred/overflow counts were
+20/0/0, so `knownLossFree=false`. Camera/depth selection remained disabled. MC was
+not running; the receiver timeout was expected and independent of host metadata.
+The [host depth note](../../docs/host-depth-probe.md) records the view-description
+classification limitation and why these observations cannot identify world depth.
+
+Still open: view normalization, full host-observer callback coverage/overhead, resize/world-switch/resource lifetime,
 frame callback timing, the actual host
 camera/projection and depth resource/convention,
 then an in-world cube with correct occlusion. Gameplay input, collision, chunk and

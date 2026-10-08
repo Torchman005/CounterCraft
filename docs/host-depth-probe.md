@@ -1,8 +1,35 @@
 # 离线宿主深度观察与投影换算
 
-2026-10-08 阶段使用独立测试程序，未启动 CS2。新观察器已编译并通过合成
-事件测试，在实际 CS2 中的回调覆盖、开销和资源对应关系仍待验证。
+2026-10-08 已通过 Steam 启动真实离线 Dust2，验证只读资源、绘制、清屏和
+效果边界回调能产生候选报告。完整回调覆盖、开销和资源对应关系仍待验证。
 上一阶段 `d1be2d9` 验证的是 MC 诊断预览，不是 CS2 世界深度融合。
+
+## 重装后的实际观察
+
+Steam build 25738536，D3D11、1920×1080、RTX 4060 Laptop。通过运行中的
+Steam 使用 `-applaunch 730`，实际子进程保留 `-insecure`、实验室标记和
+`+sv_lan 1 +map de_dust2`。直接启动 `cs2.exe` 曾出现 Launcher Error #720；
+单独加 `-steam` 不能解决，启动脚本现已改为 Steam 路径。
+
+143 份后台报告中，137 份包含有效资源候选。观察到屏幕尺寸、四倍采样的
+D24S8（候选 1），其有绘制的区间记录 13～1297 条直接/间接绘制；还有屏幕
+尺寸的单采样 D24S8、4352×5248 的 D16、960×540 和 480×270 的 D24S8。
+这些编号只属于本次资源生命周期。较多绘制、尺寸匹配或清屏值 1 均不足以
+确定世界深度、普通 Z 或 reversed-Z。
+
+结束时 `missedEvents=20`、`deferredEvents=0`、`overflow=0`，因此
+`knownLossFree=false`。未观察到延迟事件不等于完整覆盖。当前基础视图判断
+没有规范化 D3D11 的默认层数/mip 数和多采样视图，`nonBaseViewDraws` 不能
+据此证明游戏使用了非基础子资源；需要下一阶段核对实际视图描述。
+`cameraDepthVerified=false`、`autoSelected=false` 始终保留。
+
+本次没有启动 MC，接收端的 `Socket deadline exceeded` 与宿主观察器独立。
+无 guest 纹理上传，`resourceFailures=0`；这不是再次验证 MC 预览。没有进行
+性能对照，也没有验证深度像素、相机矩阵或同帧融合。
+
+测试正常退出，runtime 归零并注销 add-on。D3D11 引用计数提示再次出现，
+原因仍未定位。临时加载器和 BasePath 配置均恢复，游戏目录与新备份完全
+一致，原有 `steam_appid.txt` 和崩溃记录保留。
 
 ## CS2 未安装时的准备
 
@@ -19,10 +46,13 @@ Get-Content .local/cs2-host-probe-candidate/install-plan.json
 安装器仍要求真实游戏文件、备份和匹配的候选哈希。重装完成后重新核实位置
 和 Steam build，生成最新计划并创建新备份；旧快照不代表重装后的当前状态。
 
-完成检查并批准临时离线测试后，安装同一候选目录。
+完成检查并备份当前游戏目录后，使用
+`manage-cs2-loader.ps1 -Mode Install -SteamLaunch` 安装同一候选目录。
 `launch-cs2-lab.ps1 -StateFile <本次状态文件> -HostProbe` 默认只预览；明确
 加 `-Launch` 才启动。`-HostProbe` 添加 `-countercraft-host-probe`，保留
-`-insecure` 和实验室参数。结束后按状态文件恢复加载器。
+`-insecure` 和实验室参数。通过已运行的 Steam 启动，而非直接运行游戏 exe。
+临时 `ReShade.ini` 只包含官方 `[INSTALL] BasePath`，完整配置、日志、效果和
+缓存留在候选目录。结束后按状态文件恢复加载器和这份配置。
 完整安装步骤见 [原生实验说明](../cs2/native/README.md)。
 
 ## 只读观察器
@@ -93,6 +123,6 @@ CPU 使用手算端点/中间距离验证 8 种透视约定、jitter、FP32、�
 情况；也检查天空、非法深度、缺帧原色恢复和非法单位比例拒绝。
 这些是合成纹理与真实 shader 运算，不是 CS2 捕获。
 
-重装后的顺序：确认新 build 和回调覆盖；比较实际通道候选；确认同帧相机、
+下一步：规范化并核对实际视图描述及事件缺口；比较实际通道候选；确认同帧相机、
 投影、视口和深度约定；验证一个世界坐标立方体的遮挡和相机移动。
 实际 resize、世界切换和资源释放也仍需验证。在此之前不启用全屏世界融合。

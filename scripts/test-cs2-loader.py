@@ -17,7 +17,8 @@ PWSH = None
 class LoaderTests(unittest.TestCase):
     def setUp(self):
         self.root = ROOT / '.local' / ('loader-fixture-' + uuid.uuid4().hex)
-        self.game = self.root / 'game' / 'bin' / 'win64'
+        self.game_root = self.root / 'game-install'
+        self.game = self.game_root / 'game' / 'bin' / 'win64'
         self.game.mkdir(parents=True)
         (self.game / 'cs2.exe').write_bytes(b'Nonexecuted fixture only')
         self.target = self.game / 'dxgi.dll'
@@ -38,7 +39,7 @@ class LoaderTests(unittest.TestCase):
     def command(self, mode, *extra, error=None):
         result = subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File',
             str(ROOT / 'scripts/manage-cs2-loader.ps1'), '-Mode', mode,
-            '-Cs2Root', str(self.root), '-Candidate', str(self.candidate),
+            '-Cs2Root', str(self.game_root), '-Candidate', str(self.candidate),
             '-Loader', str(LOADER), '-BackupSnapshot', str(self.backup),
             '-StateFile', str(self.state), *extra], capture_output=True, text=True,
             encoding='utf8', errors='replace', timeout=15)
@@ -100,9 +101,11 @@ class LoaderTests(unittest.TestCase):
             plan = json.loads(result.stdout)
             self.assertEqual(plan['Mode'], 'Preview')
             self.assertEqual('-countercraft-host-probe' in plan['Arguments'], enabled)
+            self.assertEqual(plan['LaunchRoute'], 'Steam')
+            self.assertEqual(plan['SteamArguments'], ['-applaunch', '730', *plan['Arguments']])
             self.assertIn('-insecure', plan['Arguments'])
             self.assertIn('-countercraft-lab', plan['Arguments'])
-            self.assertEqual(plan['Environment']['RESHADE_BASE_PATH_OVERRIDE'], str(self.candidate))
+            self.assertEqual(plan['Candidate'], str(self.candidate))
         self.assertFalse(list(self.candidate.glob('cs2-console-*')))
 
     def test_launch_preview_refuses_restored_state(self):
@@ -137,6 +140,10 @@ class LoaderTests(unittest.TestCase):
         self.assertFalse(plan['GameFilesWritten'])
         self.assertFalse(plan['GameExecutablePresent'])
         self.assertEqual(plan['OptionalHostProbeArgument'], '-countercraft-host-probe')
+        self.assertEqual(plan['LaunchRoute'], 'Steam')
+        self.assertEqual(plan['SteamAppId'], 730)
+        self.assertEqual({Path(t['Path']).name for t in plan['Targets']}, {'dxgi.dll', 'ReShade.ini'})
+        self.assertTrue(plan['SteamBootstrap']['PreparedOnly'])
         self.assertTrue((destination / 'CounterCraftProbe.addon64').is_file())
         self.assertFalse(missing_game.exists())
 
@@ -149,6 +156,144 @@ class LoaderTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('outside the game install', result.stderr)
         self.assertFalse(missing_game.exists())
+
+    def test_steam_bootstrap_install_and_restore(self):
+        self.command('Install', '-SteamLaunch')
+        bootstrap = self.game / 'ReShade.ini'
+        self.assertEqual(bootstrap.read_bytes(), ('[INSTALL]\nBasePath=' + str(self.candidate) + '\n').encode())
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['BootstrapSha256'], hashlib.sha256(bootstrap.read_bytes()).hexdigest())
+        self.assertEqual(state['BootstrapTarget'], str(bootstrap))
+        self.assertFalse(state['BootstrapOriginalExisted'])
+        preview = self.preview_launch(probe=True)
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        self.assertTrue(json.loads(preview.stdout)['BootstrapReady'])
+        self.command('Restore')
+        self.assertFalse(bootstrap.exists())
+        self.assertFalse(self.target.exists())
+
+    def test_modified_bootstrap_preserves_both_files(self):
+        self.command('Install', '-SteamLaunch')
+        bootstrap = self.game / 'ReShade.ini'
+        bootstrap.write_bytes(b'External config')
+        self.command('Restore', error='Bootstrap changed')
+        self.assertEqual(bootstrap.read_bytes(), b'External config')
+        self.assertEqual(self.target.read_bytes(), LOADER.read_bytes())
+        self.assertEqual(json.loads(self.state.read_text())['Mode'], 'Installed')
+
+    def test_modified_loader_preserves_bootstrap_too(self):
+        self.command('Install', '-SteamLaunch')
+        before = (self.game / 'ReShade.ini').read_bytes()
+        self.target.write_bytes(b'External loader')
+        self.command('Restore', error='Target changed')
+        self.assertEqual((self.game / 'ReShade.ini').read_bytes(), before)
+        self.assertEqual(self.target.read_bytes(), b'External loader')
+
+    def test_manipulated_bootstrap_target_is_refused(self):
+        self.command('Install', '-SteamLaunch')
+        other = self.root / 'other.ini'; other.write_bytes(b'Preserve this')
+        state = json.loads(self.state.read_text()); state['BootstrapTarget'] = str(other)
+        self.state.write_text(json.dumps(state))
+        self.command('Restore', error='exact bootstrap')
+        self.assertEqual(other.read_bytes(), b'Preserve this')
+        self.assertTrue(self.target.exists())
+        self.assertTrue((self.game / 'ReShade.ini').exists())
+
+    def test_existing_config_is_never_overwritten(self):
+        bootstrap = self.game / 'ReShade.ini'; bootstrap.write_bytes(b'Existing config')
+        self.command('Install', '-SteamLaunch', error='Existing game-folder ReShade.ini')
+        self.assertEqual(bootstrap.read_bytes(), b'Existing config')
+        self.assertFalse(self.target.exists())
+        self.assertFalse(self.state.exists())
+
+    def test_missing_owned_files_can_finish_restore(self):
+        self.command('Install', '-SteamLaunch')
+        # A manual removal or an interrupted restore is completed without removing other files.
+        self.target.unlink()
+        self.command('Restore')
+        self.assertFalse((self.game / 'ReShade.ini').exists())
+        self.assertEqual(json.loads(self.state.read_text())['Mode'], 'Restored')
+
+    def mock_steam_launch(self, suffix='', parent=17, exited=False, vanilla=False):
+        if not vanilla:
+            self.command('Install', '-SteamLaunch')
+        def quote(value):
+            return "'" + str(value).replace("'", "''") + "'"
+        expected = ('-insecure -console +sv_lan 1 +map de_dust2' if vanilla else
+            '-insecure -countercraft-lab -countercraft-preview -console +sv_lan 1 +map de_dust2 -countercraft-host-probe')
+        command_line = '"' + str(self.game / 'cs2.exe') + '" -steam ' + expected + suffix
+        # Shadow all OS process operations. The fixture executables are never executed.
+        script = self.root / 'mock-steam-launch.ps1'
+        script.write_text(r"""$ErrorActionPreference='Stop'
+$script:launched=$false
+function Get-CimInstance {
+    param($Filter)
+    if($Filter -like '*steam.exe*') {
+        [pscustomobject]@{ProcessId=17;ExecutablePath='C:\Steam fixture\steam.exe'}
+    } elseif($script:launched) {
+        [pscustomobject]@{ProcessId=18;ParentProcessId=PARENT;ExecutablePath=GAME_EXE;CommandLine=COMMAND_LINE}
+    }
+}
+function Get-Process {
+    param($Name,$Id)
+    if($Name){return}
+    $owned=[pscustomobject]@{Id=$Id}
+    $owned | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {param($ms) return EXITED}
+    $owned
+}
+function Start-Process {
+    param($FilePath,$ArgumentList,$WindowStyle)
+    if($FilePath -ne 'C:\Steam fixture\steam.exe' -or $ArgumentList[0] -ne '-applaunch' -or $ArgumentList[1] -ne '730') {
+        throw 'Attempted a direct or incorrect launch in fixture'
+    }
+    $script:launched=$true
+}
+INVOKE_LAUNCHER
+""".replace('PARENT', str(parent)).replace('GAME_EXE', quote(self.game / 'cs2.exe'))
+            .replace('COMMAND_LINE', quote(command_line)).replace('EXITED', '$true' if exited else '$false')
+            .replace('INVOKE_LAUNCHER', ('& ' + quote(ROOT / 'game/launch-offline.ps1') + ' -Cs2Root ' + quote(self.game_root) + ' -Launch' if vanilla else
+                '& ' + quote(ROOT / 'scripts/launch-cs2-lab.ps1') + ' -StateFile ' + quote(self.state) + ' -HostProbe -Launch') + ' | ConvertTo-Json -Depth 5'), encoding='utf8')
+        return subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File', str(script)],
+            capture_output=True, text=True, encoding='utf8', errors='replace', timeout=15)
+
+    def test_steam_child_verification_without_launching_game(self):
+        result = self.mock_steam_launch()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt['ProcessId'], 18)
+        self.assertEqual(receipt['LaunchRoute'], 'Steam')
+        self.assertTrue(receipt['ProcessIdentityVerified'])
+
+    def test_steam_child_extra_online_arguments_are_refused(self):
+        result = self.mock_steam_launch(suffix=' +connect external-server')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('arguments differ', result.stderr)
+        receipts = list(self.candidate.glob('steam-launch-*.json'))
+        self.assertEqual(len(receipts), 1)
+        self.assertFalse(json.loads(receipts[0].read_text())['ProcessIdentityVerified'])
+
+    def test_steam_child_wrong_parent_is_refused(self):
+        result = self.mock_steam_launch(parent=19)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('as its child', result.stderr)
+
+    def test_steam_child_exit_is_not_launch_success(self):
+        result = self.mock_steam_launch(exited=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('exited during startup', result.stderr)
+
+    def test_vanilla_offline_launch_also_uses_steam(self):
+        result = self.mock_steam_launch(vanilla=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt['LaunchRoute'], 'Steam')
+        self.assertFalse(receipt['ModInstalled'])
+        self.assertEqual(receipt['ProcessId'], 18)
+
+    def test_vanilla_offline_extra_arguments_are_refused(self):
+        result = self.mock_steam_launch(vanilla=True, suffix=' -secure')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('arguments differ', result.stderr)
 
     # Fixtures remain under .local as failure evidence; no recursive cleanup/game changes.
 
