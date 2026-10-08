@@ -656,3 +656,48 @@ launch, in-game test, rendering bridge, or complete port has been performed.
 - https://github.com/rehan-remade/universal-modder/blob/main/skills/mashup-mods/SKILL.md
 - https://github.com/rehan-remade/universal-modder/blob/main/skills/mod-any-game/SKILL.md
 - https://github.com/rehan-remade/universal-modder/blob/main/knowledge/games/portal-2/portalcraft-minecraft-inside-portal-2.md
+
+## Raw MSAA evidence capture (2026-10-08)
+
+- Added DepthSampler: owned typeless depth copy, raw per-sample min/max RG32F,
+  single/MSAA shader paths, CS/class-instance/SRV0/UAV0 restoration. Hardware
+  debug-layer oracle passed 32 typed/typeless D16/D24S8/D32/D32S8 x 1/2/4/8
+  sample cases without debug warnings. A foreign D3D11 device is rejected.
+- Added three-slot asynchronous depth/VS/PS readback. Production uses only
+  EVENT/GetData(DONOTFLUSH) and Map(DO_NOT_WAIT), no Flush or GPU wait. GPU oracle
+  verifies original depth/constants after host mutation/release, compact row pitch,
+  full-slot refusal, and D3D11.1 partial binding ranges. CPU bytes only go to disk.
+- Opt-in -DepthCapture implies HostProbe. Per add-on lifetime: at most 18 captures,
+  every 240 effect intervals at candidate draw 64/256/512, explicitly BEFORE that
+  draw. This is partial channel evidence, not a final world-depth frame or verified
+  camera. Larger-than-64KiB constants are explicitly skipped. All private data
+  stays in the ignored candidate captures tree.
+- First Steam launch waited about 48 seconds for shader/depot checks, beyond the
+  old 40-second script deadline. The exact late child and arguments were verified
+  and receipt annotated; future launch deadline defaults to 120 seconds (40-180).
+- Initial live capture rejected ReShade's original/proxy GetDevice pointer mismatch.
+  Public unique GUID device-private-data identity now validates the same underlying
+  object without accepting arbitrary same-adapter devices or retaining proxy refs.
+  The owned GUID is cleared on sampler destruction. Three failures stop new capture.
+- A first successful export using the observer's shared background writer lost
+  54,876 metadata events. That run is NOT loss-free. Separated bounded CPU disk
+  writing into its own thread and report-error lock from readback queue locking.
+- Final revised binary: Steam child PID 9412, exact offline args, local Dust2.
+  54 reports across startup/render lifetimes. 18 queued/written, GPU pending 0,
+  failures 0, discarded 0, two explicit busy skips. Maximum diagnostic callback
+  6509us (includes allocation/CPU copy; not continuous bridge/FPS performance).
+  Render lifecycle processed 16,976,442 events, missed/deferred/overflow all 0,
+  peak backlog 5044/16384, max background drain 237us. Final runtimes/devices/
+  pending all 0. Hardware captures: 1680x1050, typeless R24G8 + D24S8, 4 samples;
+  viewport [0,0.95], LESS_EQUAL. Depth previews show road/walls/car geometry.
+- Independent writer previous run also exported all 18 with no capture failures
+  and zero defined observer gaps during observation. Native teardown still logs
+  an unexplained reference count warning (final 1656); no no-leak claim.
+- Ten CTest suites, 18 Python regressions, 27 mocked loader/Steam fixtures pass.
+  Existing Java code is unchanged; its previous 16 Gradle results are not reruns.
+- Backup: C:/Users/23182/.universal-modder/backups/cs2-depth-capture-20261008/
+  20261008-124838.zip. Both exact installation states were restored, and the game
+  win64 directory diff is added/removed/changed empty. Original PCL remains untouched.
+- Next: range-aware projection inversion, mathematical/scene verification of
+  projection/view/pose from public binding copies, then known in-world cube.
+  cameraDepthVerified/autoSelected remain false. Complete port is not achieved.

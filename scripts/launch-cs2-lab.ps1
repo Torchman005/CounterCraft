@@ -4,6 +4,8 @@ param(
     [ValidatePattern('^[A-Za-z0-9_]+$')][string]$Map='de_dust2',
     [string]$SteamExecutable,
     [switch]$HostProbe,
+    [switch]$DepthCapture,
+    [ValidateRange(40,180)][int]$StartupTimeoutSeconds=120,
     [switch]$Launch
 )
 $ErrorActionPreference = 'Stop'
@@ -15,7 +17,8 @@ $candidate = [IO.Path]::GetFullPath($state.Candidate)
 if ((Get-FileHash -LiteralPath $state.Target -Algorithm SHA256).Hash.ToLowerInvariant() -ne $state.LoaderSha256) { throw 'Installed loader changed.' }
 # Steam supplies its own -steam flag. Request only the fixed offline lab arguments.
 $launchArguments = @('-insecure','-countercraft-lab','-countercraft-preview','-console','+sv_lan','1','+map',$Map)
-if ($HostProbe) { $launchArguments += '-countercraft-host-probe' }
+if ($HostProbe -or $DepthCapture) { $launchArguments += '-countercraft-host-probe' }
+if ($DepthCapture) { $launchArguments += '-countercraft-depth-capture' }
 $steamArguments = @('-applaunch','730') + $launchArguments
 $steamProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'steam.exe'")
 if (-not $SteamExecutable -and $steamProcesses.Count -eq 1) { $SteamExecutable = $steamProcesses[0].ExecutablePath }
@@ -44,7 +47,7 @@ $receiptFile = Join-Path $candidate ('steam-launch-' + [guid]::NewGuid().ToStrin
 $receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $receiptFile -Encoding utf8
 try {
     Start-Process -FilePath $SteamExecutable -ArgumentList $steamArguments -WindowStyle Hidden | Out-Null
-    $deadline = [DateTime]::UtcNow.AddSeconds(40)
+    $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     do {
         $started = @(Get-CimInstance Win32_Process -Filter "Name = 'cs2.exe'")
         if ($started.Count) { break }

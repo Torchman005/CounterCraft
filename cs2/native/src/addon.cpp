@@ -1,7 +1,8 @@
-// Diagnostic ReShade candidate. It does not read CS2 memory, camera or scene depth.
+// Offline ReShade candidate. Optional capture reads public D3D11 bindings only.
 #include "receiver.hpp"
 #include "offline_guard.hpp"
 #include "host_probe.hpp"
+#include "host_capture.hpp"
 #include <reshade.hpp>
 #include <shellapi.h>
 #include <json.hpp>
@@ -54,6 +55,7 @@ struct RuntimeTextures {
 struct AddonState {
     cc::Receiver receiver;
     cc::HostProbe host_probe;
+    cc::HostCapture host_capture;
     bool preview{};
     std::mutex runtimes_mutex, report_mutex;
     std::unordered_map<api::effect_runtime*,RuntimeTextures> runtimes;
@@ -63,7 +65,8 @@ struct AddonState {
     bool ending{};
     std::thread reporter;
 
-    AddonState(bool p, bool probe) : host_probe(probe), preview(p) {}
+    AddonState(bool p, bool probe, bool capture, const std::filesystem::path& path)
+        : host_probe(probe), host_capture(capture,path), preview(p) {}
     void log_report(bool final) {
         const auto status=receiver.stats();
         const auto start=std::chrono::steady_clock::now();
@@ -72,7 +75,8 @@ struct AddonState {
             {"size",{width.load(),height.load()}},{"uploads",uploads.load()},
             {"resourceFailures",failures.load()},{"received",status.received},
             {"connected",status.connected},{"failure",status.failure},
-            {"hostCameraDepthVerified",false},{"hostDepthProbe",host_probe.report()}};
+            {"hostCameraDepthVerified",false},{"hostDepthProbe",host_probe.report()},
+            {"hostDepthCapture",host_capture.report()}};
         // Includes snapshot and JSON tree construction, excludes dump/disk logging.
         report["reportBuildUs"]=std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now()-start).count();
@@ -211,13 +215,18 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon, HMODULE reshade_m
     if (!cc::offline_lab_allowed(executable,arguments)) return false;
     if (!reshade::register_addon(addon,reshade_module)) return false;
     try {
+        wchar_t module_path[32768]{};
+        if(!GetModuleFileNameW(addon,module_path,DWORD(std::size(module_path)))) throw std::runtime_error("Addon path unavailable");
+        const bool capture=cc::has_argument(arguments,L"-countercraft-depth-capture");
         state = new AddonState(cc::has_argument(arguments,L"-countercraft-preview"),
-            cc::has_argument(arguments,L"-countercraft-host-probe"));
+            capture || cc::has_argument(arguments,L"-countercraft-host-probe"),capture,
+            std::filesystem::path(module_path).parent_path());
         reshade::register_event<reshade::addon_event::init_effect_runtime>(init_runtime);
         reshade::register_event<reshade::addon_event::destroy_effect_runtime>(destroy_runtime);
         reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(reload_effects);
         reshade::register_event<reshade::addon_event::reshade_begin_effects>(begin_effects);
         state->host_probe.install();
+        state->host_capture.install();
         state->reporter = std::thread(&AddonState::report_loop,state);
         reshade::log::message(reshade::log::level::info,"CounterCraft upload candidate: offline guard passed. Host camera/depth unverified.");
         return true;
@@ -229,6 +238,7 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon, HMODULE reshade_m
 
 extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon, HMODULE reshade_module) {
     if (!state) return;
+    state->host_capture.uninstall();
     state->host_probe.uninstall();
     reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(begin_effects);
     reshade::unregister_event<reshade::addon_event::reshade_reloaded_effects>(reload_effects);

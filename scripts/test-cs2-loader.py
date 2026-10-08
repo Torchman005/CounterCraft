@@ -101,7 +101,7 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(other.read_bytes(), b'Own test marker')
         self.assertEqual(self.target.read_bytes(), LOADER.read_bytes())
 
-    def preview_launch(self, probe=False, map_name='de_dust2'):
+    def preview_launch(self, probe=False, map_name='de_dust2', capture=False):
         # Only invoke the launcher's default preview; never pass -Launch.
         def quote(value):
             return "'" + str(value).replace("'", "''") + "'"
@@ -109,6 +109,7 @@ class LoaderTests(unittest.TestCase):
         script.write_text("$ErrorActionPreference='Stop'\nfunction Get-CimInstance {param($Filter)}\n& " +
             quote(ROOT / 'scripts/launch-cs2-lab.ps1') + ' -StateFile ' + quote(self.state) +
             ' -Map ' + quote(map_name) + (' -HostProbe' if probe else '') +
+            (' -DepthCapture' if capture else '') +
             ' | ConvertTo-Json -Depth 5\n', encoding='utf8')
         return subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File', str(script)],
             capture_output=True, text=True, encoding='utf8', errors='replace', timeout=15)
@@ -127,6 +128,18 @@ class LoaderTests(unittest.TestCase):
             self.assertIn('-countercraft-lab', plan['Arguments'])
             self.assertEqual(plan['Candidate'], str(self.candidate))
         self.assertFalse(list(self.candidate.glob('cs2-console-*')))
+
+    def test_depth_capture_is_opt_in_and_implies_probe(self):
+        self.command('Install')
+        for probe, capture in ((False, False), (True, False), (False, True), (True, True)):
+            result = self.preview_launch(probe=probe, capture=capture)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            plan = json.loads(result.stdout)
+            self.assertEqual('-countercraft-depth-capture' in plan['Arguments'], capture)
+            self.assertEqual(plan['Arguments'].count('-countercraft-host-probe'), int(probe or capture))
+            self.assertIn('-insecure', plan['Arguments'])
+            self.assertEqual(plan['Mode'], 'Preview')
+        self.assertFalse((self.candidate / 'captures').exists())
 
     def test_launch_preview_refuses_restored_state(self):
         self.command('Install'); self.command('Restore')

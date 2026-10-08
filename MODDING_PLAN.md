@@ -100,6 +100,11 @@ than one round when the real-game oracle exposes a new issue.
 1. Identify the relevant depth candidate with scene evidence, establish MSAA
    handling and measure render/total overhead. Observer's defined event gaps were
    zero in the new offline session; unknown callback coverage still needs evidence.
+   Raw single/MSAA sampling now passes 32 hardware cases and real four-sample
+   Dust2 export (18 captures). A separate writer preserves observer continuity:
+   16,976,442 events, defined loss/deferred/overflow zero in the final run.
+   Pre-draw depth is partial; complete world-pass selection is not established.
+   Actual viewport depth is [0,0.95], so range-aware inversion is required next.
 2. Confirm the host camera/projection/viewport and depth convention.
 3. Align the actual MC view and host pose/units/timing, then verify real occlusion
    with a known in-world cube.

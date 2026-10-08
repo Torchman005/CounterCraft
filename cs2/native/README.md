@@ -262,7 +262,18 @@ were zero and the restored directory matched its fresh backup. Camera/depth
 selection remains false; this does not prove unknown callback coverage or FPS
 overhead, and the D3D11 reference-count warning still needs investigation.
 
-Still open: verified world-depth identity/MSAA access, unknown host callback paths
+Optional `launch-cs2-lab.ps1 -DepthCapture` now exports limited private depth/VS/PS
+binding evidence, and implies HostProbe. The raw MSAA min/max sampler passes 32
+hardware/debug-layer cases; a three-slot asynchronous oracle verifies original
+bytes after host mutation/release and partial constant-buffer bindings. Captures
+are explicitly pre-draw, not final world frames. Public D3D11 staging/event queries
+never flush/wait in production; a separate bounded writer handles disk output.
+The actual offline Dust2 world-sized candidate is readable at four samples and
+1680x1050, with viewport depth [0,0.95]. Identity/pose/occlusion remain unverified.
+See [capture semantics](../../docs/host-depth-probe.md). Steam's startup deadline
+now defaults to 120 seconds for shader/depot checks and can be set within 40-180.
+
+Still open: verified world-depth identity, unknown host callback paths
 and rendering overhead, resize/world-switch/resource lifetime,
 frame callback timing, the actual host
 camera/projection and depth resource/convention,

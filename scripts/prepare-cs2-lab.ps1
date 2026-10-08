@@ -64,6 +64,7 @@ $plan = [pscustomobject]@{
     SteamAppId = 730
     Arguments = @('-insecure', '-countercraft-lab', '-countercraft-preview', '-console', '+sv_lan', '1', '+map', 'de_dust2')
     OptionalHostProbeArgument = '-countercraft-host-probe'
+    OptionalDepthCaptureArgument = '-countercraft-depth-capture (implies host probe; private evidence only)'
     SteamBootstrap = @{ Path=(Join-Path $gameDirectory 'ReShade.ini'); Section='INSTALL'; BasePath=$Destination; PreparedOnly=$true }
     CandidateAddon = Join-Path $Destination 'CounterCraftProbe.addon64'
     CandidateSha256 = (Get-FileHash -LiteralPath (Join-Path $Destination 'CounterCraftProbe.addon64') -Algorithm SHA256).Hash

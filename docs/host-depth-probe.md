@@ -188,6 +188,47 @@ D3D11 延迟命令录制/回放暂不重建，记录 `deferredEvents`；间接�
 不同尺寸。清屏 0/1 不能单独证明 reversed-Z。报告始终设置
 `autoSelected=false`、`cameraDepthVerified=false`。
 
+## 限量像素和常量缓冲捕获
+
+`launch-cs2-lab.ps1 -DepthCapture` 显式启用 `-countercraft-depth-capture`，
+并自动包含 HostProbe。仍需同一已备份、安装记录匹配的离线 Steam 会话；
+默认启动脚本只预览。普通 `-HostProbe` 保持只记录元数据，不读像素或缓冲。
+
+捕获器只调查输出尺寸匹配、单层单 mip 的 2D/2DMS 深度，在每 240 个效果
+边界区间的候选第 64/256/512 次绘制之前取证，单个 add-on 生命周期最多
+18 份。`frame` 是效果边界计数，不是游戏模拟帧号；深度是当前绘制之前的
+部分结果，缓冲是该次绘制当前绑定的数据，不能冒充完整世界通道结束帧。
+间接绘制的 `instances=0` 表示未知。没有自动选择世界深度或相机。
+
+`DepthSampler` 复制到自有 typeless 纹理，用 `Texture2D/Texture2DMS.Load`
+抽取每像素原始采样最小值和最大值，输出 RG32F。支持 D16/D24S8/D32/D32S8、
+typed/typeless、1/2/4/8 samples，不对深度调用 `ResolveSubresource`。
+它保存并恢复 CS shader/class instances/SRV0/UAV0，不改变图形 DSV。
+ReShade 原生上下文和资源的 GetDevice 可返回原设备/代理，设备身份通过
+公开 SetPrivateData/GetPrivateData 的独立临时 GUID 核验；GUID 在采样器
+销毁时清除，不存 COM 引用，也不通过同一 adapter 猜测同一设备。
+
+三槽 GPU ring 使用自有 staging 和 EVENT query。后续效果边界用
+`GetData(DONOTFLUSH)`、`Map(DO_NOT_WAIT)` 收回，不 Flush、不轮询等待 GPU；
+槽忙就跳过。当前公开绑定的 VS/PS 常量缓冲复制上限每个 64KiB，D3D11.1
+的 firstConstant/numConstants 范围单独记录，超过上限明确标记 skipped。
+宿主引用只存在于捕获回调中；后台只接收 CPU bytes。专用 writer 写盘，
+不占用元数据观察器的后台消费者。退出先解除生产者，释放 GPU 资源，再
+排空 CPU 写盘队列。连续三次失败停止新的取证。
+
+私有证据位于候选目录 `captures/session-*/capture-*/`，包括 capture.json、
+depth-minmax.f32（小端 float32 min/max、左上原点、紧密行）、vs-N.bin/ps-N.bin。
+manifest 记录尺寸/格式/采样、候选生命周期号、绘制序号、视口深度范围、
+深度比较状态和缓冲绑定范围。不提交任何捕获、游戏 shader、截图或游戏资产。
+`hostDepthCapture` 报告 queued/written/pending/busy/failures/discarded 和最大
+诊断回调时间；这包含分配/复制，只是限量取证成本，不是连续桥接性能基准。
+
+硬件调试层 oracle 覆盖 32 个深度格式/采样组合和 CS/OM 状态恢复。异步
+oracle 验证三个槽、满槽拒绝、row pitch、部分绑定，以及宿主在排队后改写/
+释放时仍读取原始副本。实际离线 Dust2 已取得 1680×1050 四倍 D24S8 深度；
+深度图有道路、墙体、车辆，视口范围是 [0,0.95]。完整相机、通道结束时序、
+遮挡和连续性能仍待核实。
+
 ## 显式投影约定
 
 `ProjectionDepth::from_d3d_column_major` 接受已确认是 D3D `[0,1]` 深度范围、
