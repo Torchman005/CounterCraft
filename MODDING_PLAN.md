@@ -106,6 +106,10 @@ than one round when the real-game oracle exposes a new issue.
    Pre-draw depth is partial; complete world-pass selection is not established.
    Actual viewport depth is [0,0.95], so range-aware inversion is required next.
 2. Confirm the host camera/projection/viewport and depth convention.
+   Range-aware inversion and explicit caller-confirmed background now pass 192
+   independent GPU cases. An offset-free, offline binding analyzer finds one
+   mathematically consistent view/projection/full-VP/relative-VP set in each of
+   36 real captures. Scene pose, units and final-pass timing remain unverified.
 3. Align the actual MC view and host pose/units/timing, then verify real occlusion
    with a known in-world cube.
 4. Route gameplay input, player state/collision and MC interactions; test building,

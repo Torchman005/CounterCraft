@@ -257,6 +257,42 @@ eye_z = (b - window_depth * d) / (window_depth * c - a)
 先换算到 guest 单位再比较。协议目前约定 32 Source 单位对应 1 MC 方块，
 仍须用实际 CS2 场景验证。正确单位不能替代相机位置、旋转、镜头和时序对齐。
 
+### 视口范围和明确背景
+
+`ProjectionDepth::with_viewport(minDepth,maxDepth)` 将原始视口深度纳入逆运算：
+`rawDepth=minDepth+(maxDepth-minDepth)*clipDepth`。重复调用替换范围，
+不叠加缩放；镜头、近远面和手性仍由原始 clip 投影推导。范围外的深度默认
+拒绝/保留宿主颜色，不猜它是天空。仅当调用者已确认清屏值时，显式
+`with_clear_value(rawClear)` 才把该值视为无几何背景，允许前景 guest 显示。
+清屏值不由投影矩阵推测。当前未将这些参数自动绑定到 CS2。
+
+CPU 检查范围替换、边界、非法输入和明确背景。硬件 compositor oracle
+覆盖 [0,1]、[0,0.95]、[0.2,0.8]、[0.95,1] 四种范围，8 种投影约定、
+两种分辨率和 0.5/1/32 单位比例，共 192 个组合，检查背景、无效深度、
+guest 天空与缺帧恢复。这仍是独立 GPU 实验，不是实际 CS2 遮挡验收。
+
+### 公开绑定副本的相机候选分析
+
+```powershell
+python -m bridge.camera_evidence '<私有 capture.json>' --output .local/camera-evidence.json
+```
+
+该工具只读导出的缓冲，不打开进程、不读取游戏内存、没有固定零售偏移。
+只分析 VS 实际绑定的 byte range，有限长度、16-byte 对齐，明确测试 row/
+column-major 两种解释。候选需同时满足：透视矩阵合法且 aspect 匹配当前
+视口；view 是正交且无缩放/镜像的仿射变换；同份捕获还有 `P*V` 和去除
+view 平移的相机相对 VP 两个独立乘积。布局、slot、byteOffset 作为本次
+数据中的位置输出，不当成稳定游戏 ABI。重复证据归并，同次至多 8 个候选。
+
+两次真实 Dust2 导出的 36 份捕获各有一个满足这两种乘积的数学候选，
+对应右手普通 Z、near=4、far≈10000、垂直 FOV≈83.58°、aspect≈1.6。
+姿态推导仅采用候选 Source X/Y 水平、Z 向上的约定，尚未和控制台已知
+位置/旋转及场景移动核对。输出始终 `sceneVerified=false`、
+`cameraDepthVerified=false`、`autoSelected=false`、`unitsVerified=false`。
+模型/阴影或其他相机仍可能有数学上一致的变换，必须继续用游戏 oracle
+确认。八项工具测试覆盖布局、姿态、两种独立证据缺失、partial range、
+视口 aspect、文件长度/路径和非法视口。
+
 ## 验证范围与下一步
 
 CPU 使用手算端点/中间距离验证 8 种透视约定、jitter、FP32、坏布局和非法

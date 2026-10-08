@@ -46,7 +46,24 @@ int main() {
         for(double invalid:{-.001,1.001,std::numeric_limits<double>::quiet_NaN()}) rejects([&]{p.distance(invalid);});
         for(auto& v:base) v=double(float(v));
         require(std::abs(cc::ProjectionDepth::from_d3d_column_major(base).distance(.505)-2)<1e-5,"FP32 input lens");
-        std::cout<<"{\"projectionTests\":\"passed\",\"groups\":6}\n";
+        for(auto range:{std::pair{0.,.95},std::pair{.2,.8},std::pair{.95,1.}}) {
+            const auto [lo,hi]=range;
+            for(bool reverse:{false,true}) {
+                auto raw=cc::ProjectionDepth::from_d3d_column_major(fixture(reverse?-.01:1.01,reverse?1.01:-1.01,1));
+                auto v=raw.with_viewport(lo,hi);
+                close(v.distance(lo+(hi-lo)*(reverse?.495:.505)),2);
+                close(v.distance(reverse?hi:lo),1); close(v.distance(reverse?lo:hi),101);
+                close(v.near_plane(),raw.near_plane()); close(v.far_plane(),raw.far_plane());
+                close(v.with_viewport(0,1).distance(reverse?.495:.505),2); // Replacing, not composing range twice.
+                const double outside=lo>0?lo/2:(hi+1)/2;
+                rejects([&]{v.distance(outside);});
+                require(std::isinf(v.with_clear_value(outside).distance(outside)),"Explicit out-of-viewport clear not honored");
+            }
+        }
+        for(auto range:{std::pair{.9,.1},std::pair{.2,.2},std::pair{-.1,1.},std::pair{0.,1.1},
+            std::pair{0.,std::numeric_limits<double>::quiet_NaN()}}) rejects([&]{p.with_viewport(range.first,range.second);});
+        for(double clear:{-.1,1.1,std::numeric_limits<double>::quiet_NaN()}) rejects([&]{p.with_clear_value(clear);});
+        std::cout<<"{\"projectionTests\":\"passed\",\"groups\":8}\n";
         return 0;
     } catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}
 }

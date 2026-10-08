@@ -12,6 +12,7 @@ const char* shader = R"HLSL(
 cbuffer Params : register(b0) {
     float4 planes; // guest near/far, inverse host units per guest unit
     float4 hostProjection; // clip z = a*z+b, clip w = c*z+d
+    float4 hostViewport; // min/max raw depth, explicitly confirmed clear
     uint4 sizes;   // guest width/height, output width/height
     uint4 flags;   // right-handed host eye Z, guest active
 };
@@ -40,8 +41,10 @@ float4 ps(float4 position : SV_Position) : SV_Target {
     if (!isfinite(guestZ) || guestZ < 0 || guestZ >= 1) return host; // Guest sky is not geometry.
     float hostZ = hostDepth.Load(int3(hostPixel,0));
     if (!isfinite(hostZ) || hostZ < 0 || hostZ > 1) return host;
+    bool cleared = flags.z && hostZ == hostViewport.z;
+    if (!cleared && (hostZ < hostViewport.x || hostZ > hostViewport.y)) return host;
     float guestDistance = linearDepth(guestZ,planes.x,planes.y);
-    float distance = hostDistance(hostZ);
+    float distance = cleared ? 3.402823466e+38 : hostDistance(hostZ);
     if (!isfinite(distance) || distance <= 0) return host;
     return guestDistance < distance ? guestColor.Load(int3(guestPixel,0)) : host;
 }
@@ -74,7 +77,7 @@ Compositor::Compositor(ID3D11Device* device, ID3D11DeviceContext* context) : dev
     auto vs = compile("vs","vs_5_0"), ps = compile("ps","ps_5_0");
     check(device->CreateVertexShader(vs->GetBufferPointer(),vs->GetBufferSize(),nullptr,&vertex_),"Create compositor VS");
     check(device->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),nullptr,&pixel_),"Create compositor PS");
-    D3D11_BUFFER_DESC buffer{}; buffer.ByteWidth = 64; buffer.Usage = D3D11_USAGE_DEFAULT; buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_BUFFER_DESC buffer{}; buffer.ByteWidth = 80; buffer.Usage = D3D11_USAGE_DEFAULT; buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     check(device->CreateBuffer(&buffer,nullptr,&constants_),"Create compositor constants");
     D3D11_DEPTH_STENCIL_DESC depth{}; depth.DepthEnable = FALSE;
     check(device->CreateDepthStencilState(&depth,&no_depth_),"Create compositor depth state");
@@ -109,11 +112,13 @@ void Compositor::draw(ID3D11ShaderResourceView* host_color, ID3D11ShaderResource
     if (!std::isfinite(units) || units < 1e-6f || units > 1e6f)
         throw std::runtime_error("Invalid host units per guest unit");
     const auto& p=projection.coefficients();
-    struct Constants { float planes[4], projection[4]; uint32_t sizes[4], flags[4]; } parameters{
+    const auto& range=projection.viewport(); const auto clear=projection.clear_value();
+    struct Constants { float planes[4], projection[4], viewport[4]; uint32_t sizes[4], flags[4]; } parameters{
         {float(metadata_.near_plane),float(metadata_.far_plane),1/units,0},
         {float(p[0]),float(p[1]),float(p[2]),float(p[3])},
+        {float(range[0]),float(range[1]),float(clear.value_or(0)),0},
         {uint32_t(metadata_.width),uint32_t(metadata_.height),uint32_t(width),uint32_t(height)},
-        {uint32_t(projection.right_handed()),uint32_t(active && bool(color_.texture)),0,0}};
+        {uint32_t(projection.right_handed()),uint32_t(active && bool(color_.texture)),uint32_t(clear.has_value()),0}};
     context_->UpdateSubresource(constants_.Get(),0,nullptr,&parameters,0,0);
     ID3D11Buffer* cb = constants_.Get(); context_->PSSetConstantBuffers(0,1,&cb);
     context_->IASetInputLayout(nullptr); context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

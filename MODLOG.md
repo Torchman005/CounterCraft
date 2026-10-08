@@ -701,3 +701,37 @@ launch, in-game test, rendering bridge, or complete port has been performed.
 - Next: range-aware projection inversion, mathematical/scene verification of
   projection/view/pose from public binding copies, then known in-world cube.
   cameraDepthVerified/autoSelected remain false. Complete port is not achieved.
+
+## Viewport inversion and mathematical camera evidence (2026-10-08)
+
+- ProjectionDepth now folds min/max viewport depth into inverse coefficients,
+  preserves clip lens/planes/handedness, and replaces rather than double-composes
+  a changed range. Out-of-viewport values are rejected by CPU/preserve host on GPU.
+  Only caller-confirmed with_clear_value maps an exact raw clear to background;
+  neither viewport nor matrix guesses a clear value. No CS2 automatic binding yet.
+- Independent hardware GPU oracle now passes 192 combinations: eight perspective
+  conventions, two resolutions, three unit scales and four viewport ranges
+  [0,1]/[0,.95]/[.2,.8]/[.95,1]. Checks known host 2/9 versus guest 5 planes,
+  explicit background, invalid depth, guest sky and no-frame original colour.
+- Added dependency-free offline bridge.camera_evidence. Reads only bounded,
+  actually bound VS constant-buffer ranges from captured files, rejects outside
+  paths/size mismatches, explores 16-byte-aligned row/column layouts. No process
+  handle, memory scanning, retail offsets, or automatic live camera selection.
+- Requires a viewport-aspect-compatible canonical projection and an orthonormal
+  affine view plus BOTH full P*V and camera-relative P*V(rotation only) elsewhere
+  in the same public binding snapshot. Reports derived pose/lens and locations,
+  deduplicates and bounds candidates. Math consistency is not a scene oracle.
+- Analyzed 36 captures from the two independent-writer Dust2 sessions. Each has
+  one mathematical set, normal-Z/right-handed, near 4, far approximately 10000,
+  vertical FOV about 83.58 degrees, aspect 1.6. Static pose derivation suggests
+  (-1272.887,-537.879,195.628), yaw 41.63/pitch 0 in candidate Source axes; not yet
+  independently confirmed. Private full reports remain ignored; no retail data
+  or captured binary files in source distribution. All scene/units/depth-verified
+  and auto-selection flags remain false.
+- Ten CTest suites pass (CPU projection now eight groups, GPU 192 cases), all
+  26 Python tests pass including eight independent camera-evidence fixtures.
+  Existing 27 loader/Steam fixtures and 16 Java tests are unchanged prior results.
+- This stage changed arithmetic/standalone GPU and file analysis, not runtime
+  host selection or gameplay. No additional game launch required for these claims.
+  Next: explicitly trigger captures at controlled offline poses, verify angles,
+  camera height/lens and depth silhouette, then a world cube and live relay.

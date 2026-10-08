@@ -23,6 +23,7 @@ ProjectionDepth ProjectionDepth::from_d3d_column_major(const std::array<double,1
         throw std::runtime_error("Unsupported perspective lens or handedness");
     ProjectionDepth result;
     result.coefficients_ = {m[10],m[14],m[11],m[15]};
+    result.clip_coefficients_=result.coefficients_;
     result.sign_ = m[11] > 0 ? 1 : -1;
     const double zero = eye_distance(result.coefficients_,0,result.sign_);
     const double one = eye_distance(result.coefficients_,1,result.sign_);
@@ -41,6 +42,21 @@ ProjectionDepth ProjectionDepth::from_d3d_column_major(const std::array<double,1
 }
 double ProjectionDepth::distance(double depth) const {
     if (!std::isfinite(depth) || depth < 0 || depth > 1) throw std::runtime_error("Window depth outside [0,1]");
+    if(clear_ && depth==*clear_) return std::numeric_limits<double>::infinity();
+    if(depth<viewport_[0] || depth>viewport_[1]) throw std::runtime_error("Window depth outside viewport range");
     return eye_distance(coefficients_,depth,sign_);
+}
+ProjectionDepth ProjectionDepth::with_viewport(double lo,double hi) const {
+    if(!std::isfinite(lo) || !std::isfinite(hi) || lo<0 || hi>1 || hi-lo<1e-6)
+        throw std::runtime_error("Invalid viewport depth range");
+    auto result=*this; result.viewport_={lo,hi}; const auto& p=clip_coefficients_;
+    // raw = lo + (hi-lo) * (a*z+b)/(c*z+d). Fold this into
+    // the inverse coefficients; near/far and handedness remain clip properties.
+    result.coefficients_={(hi-lo)*p[0]+lo*p[2],(hi-lo)*p[1]+lo*p[3],p[2],p[3]};
+    return result;
+}
+ProjectionDepth ProjectionDepth::with_clear_value(double clear) const {
+    if(!std::isfinite(clear) || clear<0 || clear>1) throw std::runtime_error("Invalid confirmed depth clear");
+    auto result=*this; result.clear_=clear; return result;
 }
 }
