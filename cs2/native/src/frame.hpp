@@ -4,6 +4,8 @@
 #include <span>
 #include <string>
 #include <vector>
+#include <optional>
+#include "host_camera.hpp"
 
 namespace cc {
 constexpr uint32_t max_pixels = 4'194'304, max_metadata = 4096;
@@ -31,6 +33,7 @@ struct Frame {
     Metadata metadata;
     std::vector<uint8_t> pixels; // GL rows, RGBA then little-endian float32 depth.
     int64_t received_ns{};
+    std::optional<HostCamera> relayed_camera; // Set only after rendered-pose validation by Receiver.
     std::span<const uint8_t> rgba() const { return {pixels.data(), header.color_bytes}; }
     std::span<const uint8_t> depth() const { return {pixels.data() + header.color_bytes, header.depth_bytes}; }
 };

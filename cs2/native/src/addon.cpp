@@ -4,6 +4,7 @@
 #include "host_probe.hpp"
 #include "host_capture.hpp"
 #include "host_camera_feed.hpp"
+#include "world_fusion.hpp"
 #include <reshade.hpp>
 #include <shellapi.h>
 #include <json.hpp>
@@ -63,7 +64,8 @@ struct AddonState {
     cc::HostProbe host_probe;
     cc::HostCapture host_capture;
     cc::HostCameraFeed camera_feed;
-    bool preview{},gameplay{};
+    cc::WorldFusion world_fusion;
+    bool preview{},gameplay{},fusion{};
     cc::MouseMotion sampled_mouse;
     std::atomic<uint64_t> sampled_events{};
     std::atomic<uint32_t> sampled_x{},sampled_y{};
@@ -81,8 +83,9 @@ struct AddonState {
     bool ending{};
     std::thread reporter;
 
-    AddonState(bool p, bool probe, bool capture, bool camera, bool play, const std::filesystem::path& path)
-        : receiver(37122,20,play), host_probe(probe), host_capture(capture,path), camera_feed(camera && !play,path,receiver), preview(p),gameplay(play) {}
+    AddonState(bool p, bool probe, bool capture, bool camera, bool play, bool fuse, const std::filesystem::path& path)
+        : receiver(37122,20,play,fuse), host_probe(probe), host_capture(capture,path), camera_feed(camera && !play && !fuse,path,receiver),
+          world_fusion(fuse && !play,path,receiver),preview(p),gameplay(play),fusion(fuse && !play) {}
     void log_report(bool final) {
         const auto status=receiver.stats();
         const auto start=std::chrono::steady_clock::now();
@@ -93,6 +96,7 @@ struct AddonState {
             {"connected",status.connected},{"failure",status.failure},
             {"hostCameraDepthVerified",false},{"hostDepthProbe",host_probe.report()},
             {"hostDepthCapture",host_capture.report()},{"hostCameraFeed",camera_feed.report()},
+            {"worldFusion",world_fusion.report()},
             {"camerasSent",status.cameras_sent},{"cameraReleases",status.camera_releases},
             {"cameraFramesMatched",status.cameras_rendered}};
         report["gameplay"]=gameplay;report["inputsSent"]=status.inputs_sent;report["reconnects"]=status.reconnects;
@@ -230,6 +234,8 @@ void active(api::effect_runtime* runtime, bool enabled, uint32_t w=0, uint32_t h
     if (size.handle) runtime->set_uniform_value_float(size,float(w),float(h));
     const auto full=runtime->find_uniform_variable(effect,"CCFullClient");
     if(full.handle)runtime->set_uniform_value_bool(full,state->gameplay);
+    const auto world=runtime->find_uniform_variable(effect,"CCWorldFusion");
+    if(world.handle)runtime->set_uniform_value_bool(world,state->fusion);
 }
 
 void init_runtime(api::effect_runtime* runtime) {
@@ -251,6 +257,7 @@ void destroy_runtime(api::effect_runtime* runtime) {
         auto it = state->runtimes.find(runtime);
         if (it == state->runtimes.end()) return;
         active(runtime,false); it->second.release(runtime); state->runtimes.erase(it);
+        state->world_fusion.release(runtime);
         state->runtime_count.store(state->runtimes.size());
     } catch (...) { ++state->failures; }
 }
@@ -269,6 +276,7 @@ void begin_effects(api::effect_runtime* runtime, api::command_list* commands,
     if (!state) return;
     try {
         input_frame(runtime);
+        state->world_fusion.begin(runtime,commands);
         std::lock_guard lock(state->runtimes_mutex);
         const auto found = state->runtimes.find(runtime);
         if (found == state->runtimes.end()) { active(runtime,false); return; }
@@ -297,6 +305,9 @@ void begin_effects(api::effect_runtime* runtime, api::command_list* commands,
             ++state->uploads; state->width.store(w); state->height.store(h);
         }
         textures.bind(runtime); // Also refresh semantic bindings after an effect reload.
+        const auto fusion=runtime->find_uniform_variable(effect,"CCFusion");
+        const bool composing=state->fusion && state->world_fusion.bind(runtime,*frame);
+        if(fusion.handle)runtime->set_uniform_value_bool(fusion,composing);
         active(runtime,state->preview && (!state->gameplay || state->input_enabled),w,h);
     } catch (...) {
         ++state->failures;
@@ -328,7 +339,7 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon, HMODULE reshade_m
         state = new AddonState(cc::has_argument(arguments,L"-countercraft-preview"),
             capture || cc::has_argument(arguments,L"-countercraft-host-probe"),capture,
             cc::has_argument(arguments,L"-countercraft-camera-relay"),
-            cc::has_argument(arguments,L"-countercraft-gameplay"),
+            cc::has_argument(arguments,L"-countercraft-gameplay"),cc::has_argument(arguments,L"-countercraft-world-fusion"),
             std::filesystem::path(module_path).parent_path());
         reshade::register_event<reshade::addon_event::init_effect_runtime>(init_runtime);
         reshade::register_event<reshade::addon_event::destroy_effect_runtime>(destroy_runtime);
@@ -337,6 +348,7 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon, HMODULE reshade_m
         state->host_probe.install();
         state->host_capture.install();
         state->camera_feed.install();
+        state->world_fusion.install();
         state->reporter = std::thread(&AddonState::report_loop,state);
         reshade::log::message(reshade::log::level::info,"CounterCraft upload candidate: offline guard passed. Host camera/depth unverified.");
         return true;
@@ -350,6 +362,9 @@ extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon, HMODULE reshade
     if (!state) return;
     state->host_capture.uninstall();
     state->camera_feed.uninstall();
+    // Clear semantic references before freeing any owned depth SRVs.
+    for(auto& [runtime,_]:state->runtimes)state->world_fusion.release(runtime);
+    state->world_fusion.uninstall();
     state->host_probe.uninstall();
     reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(begin_effects);
     reshade::unregister_event<reshade::addon_event::reshade_reloaded_effects>(reload_effects);

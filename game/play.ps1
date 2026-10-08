@@ -6,7 +6,10 @@ param(
     [string]$SessionDirectory,
     [string]$Loader,
     [string]$NativeBuild,
-    [string]$SteamExecutable
+    [string]$SteamExecutable,
+    [switch]$WorldFusion,
+    [string]$CameraLayout,
+    [string]$FusionPolicy
 )
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path $PSScriptRoot -Parent
@@ -45,6 +48,12 @@ if($Mode -eq 'Recover') {
     return
 }
 if(Get-Process -Name cs2 -ErrorAction SilentlyContinue){throw 'Close the existing CS2 process before Play.'}
+if($WorldFusion) {
+    foreach($calibration in @($CameraLayout,$FusionPolicy)) {
+        if(-not $calibration -or -not (Test-Path -LiteralPath $calibration -PathType Leaf)){throw 'Experimental WorldFusion requires CameraLayout and FusionPolicy files.'}
+        if((Get-Item -LiteralPath $calibration).Length -gt 65536){throw 'Fusion calibration exceeds 64KiB.'}
+    }
+}
 if(Test-Path -LiteralPath $stateFile){throw 'Session already exists. Recover it, then use a new SessionDirectory.'}
 if(-not $BackupSnapshot -or -not (Test-Path -LiteralPath $BackupSnapshot -PathType Leaf)){throw 'Play requires a completed pre-loader backup ZIP.'}
 if(-not (Test-Path -LiteralPath $Loader -PathType Leaf)){throw 'Fetch the pinned ReShade runtime first.'}
@@ -61,15 +70,22 @@ try {
     $receipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $receiptFile -Encoding utf8
     try {
         & (Join-Path $scripts 'prepare-cs2-lab.ps1') -Cs2Root $Cs2Root -NativeBuild $NativeBuild -Destination $candidate | Out-Null
+        if($WorldFusion) {
+            Copy-Item -LiteralPath $CameraLayout -Destination (Join-Path $candidate 'camera-layout.json')
+            Copy-Item -LiteralPath $FusionPolicy -Destination (Join-Path $candidate 'fusion-policy.json')
+        }
         & (Join-Path $scripts 'manage-cs2-loader.ps1') -Mode Install -Cs2Root $Cs2Root -Candidate $candidate -Loader $Loader -BackupSnapshot $BackupSnapshot -StateFile $stateFile -SteamLaunch | Out-Null
         $launch=@{StateFile=$stateFile;Gameplay=$true;Launch=$true}
+        if($WorldFusion){$launch.Remove('Gameplay');$launch.WorldFusion=$true}
         if($SteamExecutable){$launch.SteamExecutable=$SteamExecutable}
         $started=& (Join-Path $scripts 'launch-cs2-lab.ps1') @launch
         if(-not $started.ProcessIdentityVerified -or $started.ProcessId -lt 1){throw 'No verified Steam child.'}
         $owned=Get-Process -Id $started.ProcessId
         $receipt.ProcessId=$owned.Id;$receipt.ProcessStartedUtc=$owned.StartTime.ToUniversalTime().ToString('o');$receipt.Mode='Running'
         $receipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $receiptFile -Encoding utf8
-        Write-Host "CounterCraft offline session PID $($owned.Id). Close CS2 to finish and restore. F8 toggles the MC view/input."
+        Write-Host "CounterCraft offline session PID $($owned.Id). Close CS2 to finish and restore."
+        if($WorldFusion){Write-Host 'Experimental static world fusion; CS2 controls the camera. No shared collision/gameplay.'}
+        else{Write-Host 'F8 toggles the MC view/input.'}
         while(-not $owned.HasExited){Start-Sleep -Milliseconds 500;$owned.Refresh()}
         $owned.Dispose()
     } catch {

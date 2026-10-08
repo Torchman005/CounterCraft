@@ -7,11 +7,11 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.0-alpha.2"
+VERSION = "0.1.0-alpha.3"
 ROOT_FILES = {"README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "MODLOG.md",
               "MODDING_PLAN.md", "CONTRIBUTING.md", ".gitignore"}
 SOURCE_DIRS = {"bridge", "cs2", "minecraft", "game", "docs", "scripts"}
-EXTENSIONS = {".md", ".py", ".ps1", ".cpp", ".hpp", ".h", ".java", ".fx", ".gradle", ".json", ".properties", ".txt"}
+EXTENSIONS = {".md", ".py", ".ps1", ".cpp", ".hpp", ".h", ".java", ".fx", ".fxh", ".gradle", ".json", ".properties", ".txt"}
 BINARY_FILES = {"native/CounterCraftProbe.addon64", "mods/countercraft-minecraft-0.1.0.jar"}
 
 

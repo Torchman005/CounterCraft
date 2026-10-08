@@ -85,6 +85,7 @@ Compositor::Compositor(ID3D11Device* device, ID3D11DeviceContext* context) : dev
     check(device->CreateRasterizerState(&raster,&raster_),"Create compositor raster state");
 }
 void Compositor::upload(const Frame& frame) {
+    if(frame.metadata.full_client)throw std::runtime_error("World compositor refuses mixed client color/world depth");
     if (frame.pixels.size() != size_t(frame.metadata.width) * frame.metadata.height * 8)
         throw std::runtime_error("Incomplete GPU upload payload");
     if (!color_.texture || metadata_.width != frame.metadata.width || metadata_.height != frame.metadata.height) {

@@ -1,6 +1,13 @@
 # CounterCraft offline modding plan
 
 ## Current checkpoint (2026-10-09, alpha.2)
+Experimental world fusion now has an opt-in supervised launcher, owned world/
+final depth, a current-frame GPU matrix gate and passing hardware oracles. Real
+Dust2 still produces zero effect-eligible frames due to later uncalibrated depth
+viewport changes. Live occlusion remains the next acceptance; see
+[world-fusion experiment](docs/world-fusion.md). The playable default remains the
+full-client alpha bridge.
+
 
 Basic text/editing events are now implemented and native chat + Enter is accepted
 in actual CS2. A FIFO/epoch/expiry/ack protocol avoids text loss in held-state

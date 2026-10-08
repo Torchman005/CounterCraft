@@ -51,6 +51,7 @@ MC 客户端须先进入独立单人世界。启动必须走已运行的 Steam `
 - [动作和合成协议](docs/gameplay-actions.md)
 - [帧流协议](docs/frame-stream.md)
 - [相机桥接实验](docs/camera-relay.md)
+- [实验世界融合](docs/world-fusion.md)
 - [宿主深度实验](docs/host-depth-probe.md)
 - [计划](MODDING_PLAN.md)与[验证记录](MODLOG.md)
 

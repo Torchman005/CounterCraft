@@ -25,7 +25,7 @@ struct ReceiverStats {
 };
 class Receiver {
 public:
-    explicit Receiver(uint16_t port = 37122, unsigned fps = 20, bool gameplay = false);
+    explicit Receiver(uint16_t port = 37122, unsigned fps = 20, bool gameplay = false, bool reconnect = false);
     ~Receiver();
     Receiver(const Receiver&) = delete;
     std::shared_ptr<const Frame> latest() const;
@@ -48,6 +48,7 @@ private:
     uint16_t port_;
     unsigned fps_;
     bool gameplay_{};
+    bool reconnect_{};
     mutable std::mutex mutex_;
     std::shared_ptr<const Frame> latest_;
     mutable uint64_t last_observed_{};

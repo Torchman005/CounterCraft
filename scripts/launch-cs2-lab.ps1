@@ -6,6 +6,7 @@ param(
     [switch]$HostProbe,
     [switch]$DepthCapture,
     [switch]$CameraRelay,
+    [switch]$WorldFusion,
     [switch]$Gameplay,
     [ValidateRange(40,180)][int]$StartupTimeoutSeconds=120,
     [switch]$Launch
@@ -22,14 +23,17 @@ $launchArguments = @('-insecure','-countercraft-lab','-countercraft-preview','-c
 if ($HostProbe -or $DepthCapture) { $launchArguments += '-countercraft-host-probe' }
 if ($DepthCapture) { $launchArguments += '-countercraft-depth-capture' }
 if ($Gameplay) {
-    if($CameraRelay){throw 'Gameplay owns the Minecraft camera; do not combine with CameraRelay.'}
+    if($CameraRelay -or $WorldFusion){throw 'Gameplay owns the Minecraft camera; do not combine with CameraRelay or WorldFusion.'}
     $launchArguments += '-countercraft-gameplay'
 }
-if ($CameraRelay) {
+if ($CameraRelay -or $WorldFusion) {
     if (-not (Test-Path -LiteralPath (Join-Path $candidate 'camera-layout.json') -PathType Leaf)) {
         throw 'Camera relay requires a private calibration in the candidate directory.'
     }
-    $launchArguments += '-countercraft-camera-relay'
+    if($WorldFusion) {
+        if(-not (Test-Path -LiteralPath (Join-Path $candidate 'fusion-policy.json') -PathType Leaf)){throw 'WorldFusion requires a private boundary policy in the candidate directory.'}
+        $launchArguments += '-countercraft-world-fusion'
+    }else{$launchArguments += '-countercraft-camera-relay'}
 }
 $steamArguments = @('-applaunch','730') + $launchArguments
 $steamProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'steam.exe'")

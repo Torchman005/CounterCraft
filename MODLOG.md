@@ -985,3 +985,25 @@ launch, in-game test, rendering bridge, or complete port has been performed.
 - World-depth fusion, host player/collision integration, broad native control
   acceptance, IME and D3D11 teardown attribution remain open. alpha.2 packages
   the working offline bridge, not a complete all-feature cross-game port.
+## Experimental world-fusion boundary stage (2026-10-09)
+
+- Added an explicit opt-in `WorldFusion` launcher mode. It requires private
+  camera calibration and a locally measured world/foreground depth policy; the
+  default full-client passthrough and gameplay mode are unchanged.
+- Added same-resource world-boundary identity, observed late-clear handling,
+  owned MSAA/single depth copies, private camera matrix extraction and a small
+  current-frame GPU matrix texture. The effect keeps host pixels for weapons,
+  later writes, ambiguous MSAA edges and guest sky, and fails closed on missing
+  or mismatched pose/lens/viewport evidence.
+- Added 23-case GPU occlusion/camera/late-clear oracle, current-frame camera
+  ownership/state-restore oracle, and world-boundary invalidation tests. Native
+  CTest now passes 18/18; loader fixtures 33/33 and package tests 3/3 pass.
+- Steam-launched CS2 sessions loaded the opt-in addon and captured world
+  boundaries, but `effectEligibleFrames` and `compositeFrames` remained zero in
+  the real Dust2 run. The real visible MC cube/occlusion acceptance therefore
+  remains open. This stage is an experimental guarded pipeline, not a claim of
+  completed world fusion.
+- Private calibration, policies, captures and session receipts remain ignored;
+  temporary loader files were restored after every run. The latest alpha.3
+  source package contains 148 audited files and no game assets or saves.
+

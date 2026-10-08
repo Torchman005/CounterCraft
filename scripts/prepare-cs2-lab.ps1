@@ -27,6 +27,7 @@ if (-not $gameExecutablePresent -and -not $AllowMissingGame) { throw "Missing fi
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 Copy-Item -LiteralPath $addon -Destination (Join-Path $Destination 'CounterCraftProbe.addon64') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'cs2\reshade\CounterCraftProbe.fx') -Destination $Destination -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'cs2\reshade\WorldFusion.fxh') -Destination $Destination -Force
 $preset = Join-Path $Destination 'CounterCraftLab.ini'
 $runtime = Join-Path $projectRoot '.local\reshade-runtime\ReShade64.dll'
 @'

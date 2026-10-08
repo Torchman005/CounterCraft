@@ -95,7 +95,7 @@ public:
 };
 }
 
-Receiver::Receiver(uint16_t port, unsigned fps, bool gameplay) : port_(port), fps_(fps), gameplay_(gameplay) {
+Receiver::Receiver(uint16_t port, unsigned fps, bool gameplay, bool reconnect) : port_(port), fps_(fps), gameplay_(gameplay),reconnect_(reconnect || gameplay) {
     if (!port || fps < 1 || fps > 30) throw std::runtime_error("Invalid receiver port/FPS");
     worker_ = std::thread(&Receiver::run,this);
 }
@@ -138,7 +138,7 @@ void Receiver::submit_input(Input value) {
 void Receiver::run() {
     do {
         session();
-        if(!gameplay_ || stop_)return;
+        if(!reconnect_ || stop_)return;
         for(int i=0;i<50 && !stop_;++i)std::this_thread::sleep_for(std::chrono::milliseconds(20));
         {std::lock_guard lock(mutex_);++stats_.reconnects;input_.reset();stats_.ui_dropped+=ui_.size();ui_.clear();}
     }while(!stop_);
@@ -193,7 +193,7 @@ void Receiver::session() {
         // eye. Scale is the shared protocol's explicit 32 Source units per block.
         // This does not move the MC player or supply collision/input semantics.
         const auto initial_status=status;
-        struct ExpectedPose {uint64_t sequence;std::array<double,3> position;double yaw,pitch,fov;};
+        struct ExpectedPose {uint64_t sequence;std::array<double,3> position;double yaw,pitch,fov;HostCamera host;};
         std::deque<ExpectedPose> expected_poses;
         auto heartbeat = [&] {
             const auto now=monotonic_ns();
@@ -250,7 +250,7 @@ void Receiver::session() {
                         {"position",position},{"rotation",{yaw,c.pitch,0}},{"fov",c.fov}},stop_);
                     if(ack.at("type")!="ack" || ack.at("frame")!=update->sequence) throw std::runtime_error("Camera acknowledgement mismatch");
                     sent_camera=update->sequence;camera_active=true;
-                    expected_poses.push_back({sent_camera,position,yaw,c.pitch,c.fov});
+                    expected_poses.push_back({sent_camera,position,yaw,c.pitch,c.fov,c});
                     if(expected_poses.size()>128)expected_poses.pop_front();
                     {std::lock_guard lock(mutex_);++stats_.cameras_sent;}
                 } else if(!fresh && camera_active) {
@@ -295,7 +295,7 @@ void Receiver::session() {
                         || std::abs(actual.rotation[1]-expected.pitch)>.001 || std::abs(actual.rotation[2])>.001
                         || std::abs(actual.fov-expected.fov)>.001)
                         throw std::runtime_error("Rendered MC lens/orientation differs from relayed camera");
-                    rendered_camera=true;break;
+                    frame->relayed_camera=expected.host;rendered_camera=true;break;
                 }
             }
             frame->received_ns = monotonic_ns(); sequence = h.sequence;

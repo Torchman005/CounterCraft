@@ -101,7 +101,7 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(other.read_bytes(), b'Own test marker')
         self.assertEqual(self.target.read_bytes(), LOADER.read_bytes())
 
-    def preview_launch(self, probe=False, map_name='de_dust2', capture=False, camera=False, gameplay=False):
+    def preview_launch(self, probe=False, map_name='de_dust2', capture=False, camera=False, gameplay=False, fusion=False):
         # Only invoke the launcher's default preview; never pass -Launch.
         def quote(value):
             return "'" + str(value).replace("'", "''") + "'"
@@ -112,6 +112,7 @@ class LoaderTests(unittest.TestCase):
             (' -DepthCapture' if capture else '') +
             (' -CameraRelay' if camera else '') +
             (' -Gameplay' if gameplay else '') +
+            (' -WorldFusion' if fusion else '') +
             ' | ConvertTo-Json -Depth 5\n', encoding='utf8')
         return subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File', str(script)],
             capture_output=True, text=True, encoding='utf8', errors='replace', timeout=15)
@@ -137,6 +138,25 @@ class LoaderTests(unittest.TestCase):
         self.assertIn('-countercraft-camera-relay',json.loads(result.stdout)['Arguments'])
         plain=self.preview_launch()
         self.assertNotIn('-countercraft-camera-relay',json.loads(plain.stdout)['Arguments'])
+
+    def test_world_fusion_requires_both_private_files_and_refuses_gameplay(self):
+        self.command('Install','-SteamLaunch')
+        missing=self.preview_launch(fusion=True)
+        self.assertNotEqual(missing.returncode,0)
+        self.assertIn('private calibration',missing.stderr)
+        (self.candidate/'camera-layout.json').write_text('{}')
+        missing=self.preview_launch(fusion=True)
+        self.assertNotEqual(missing.returncode,0)
+        self.assertIn('private boundary policy',missing.stderr)
+        (self.candidate/'fusion-policy.json').write_text('{}')
+        result=self.preview_launch(fusion=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('-countercraft-world-fusion',json.loads(result.stdout)['Arguments'])
+        self.assertNotIn('-countercraft-gameplay',json.loads(result.stdout)['Arguments'])
+        self.assertNotIn('-countercraft-world-fusion',json.loads(self.preview_launch().stdout)['Arguments'])
+        mixed=self.preview_launch(fusion=True,gameplay=True)
+        self.assertNotEqual(mixed.returncode,0)
+        self.assertIn('do not combine',mixed.stderr)
 
     def test_host_probe_is_opt_in_and_preview_only(self):
         self.command('Install')

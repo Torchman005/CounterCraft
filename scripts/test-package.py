@@ -13,7 +13,7 @@ class PackageTests(unittest.TestCase):
         for name in (".local/machine.json", "minecraft/run/saves/world.dat", "cs2/private.vpk",
                      "../README.md", "C:/Users/private.json", "cs2/native/build/bin.exe", "cs2\\private.cpp"):
             self.assertFalse(package.source_allowed(name), name)
-        for name in ("LICENSE", "game/start.ps1", "cs2/native/src/addon.cpp", "minecraft/src/main/resources/fabric.mod.json"):
+        for name in ("LICENSE", "game/start.ps1", "cs2/native/src/addon.cpp", "cs2/reshade/WorldFusion.fxh", "minecraft/src/main/resources/fabric.mod.json"):
             self.assertTrue(package.source_allowed(name), name)
 
     def fixture(self, root):
