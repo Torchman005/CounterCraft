@@ -55,7 +55,9 @@ collisions, weapons and entities are not fused.
 Chat/search text and IME forwarding are not implemented. Escape does not open a
 remote pause menu in the world; use F8 to return to CS2, or pause in the MC client.
 Guest pause suppresses stream/control until locally resumed. The viewport is
-currently stretched to the host backbuffer. Runtime effects/Steam overlays can
+aspect-fitted to the host backbuffer, with centered black bars. GUI deltas use
+the fitted content dimensions, so pointer and slot coordinates share the same
+mapping. Runtime effects/Steam overlays can
 intercept input. Very short presses may be missed by latest-snapshot sampling;
 this is an experimental build, not an all-controls compatibility guarantee.
 
@@ -70,6 +72,9 @@ Real Steam offline CS2: forward moves the guest; E opens/closes its inventory;
 mouse reversal changes yaw/pitch by ±12° for ±100 pixels and does not drift when
 stationary; a creative inventory click picks up oak_log; left click produces air
 in the target cell. Guest held use charges a bow for 30 ticks and stops on release.
-CS2 R-key use placed oak_planks at (27,127,-9), independently read back after
-closing CS2. Mouse-right transport remains unaccepted; use R. Additional controls
+CS2 right mouse and R-key use both placed oak_planks at (27,127,-9), independently
+read back after closing CS2. ReShade 6.8's right/middle button indices disagree
+between header and implementation; public VK button codes avoid that ambiguity.
+Pause/resume reconnects with a fresh session and neutral input. Actual guest
+resize 960x540 -> 1280x720 kept receiving/uploading with resourceFailures=0. Additional controls
 require further scene validation. Private screenshots/logs are ignored and not distributed.

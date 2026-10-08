@@ -5,6 +5,7 @@ param(
     [string]$BackupSnapshot,
     [string]$SessionDirectory,
     [string]$Loader,
+    [string]$NativeBuild,
     [string]$SteamExecutable
 )
 $ErrorActionPreference='Stop'
@@ -18,6 +19,10 @@ $stateFile=Join-Path $SessionDirectory 'loader-state.json'
 $receiptFile=Join-Path $SessionDirectory 'session.json'
 $candidate=Join-Path $SessionDirectory 'candidate'
 if(-not $Loader){$Loader=Join-Path $projectRoot '.local\reshade-runtime\ReShade64.dll'}
+if(-not $NativeBuild){
+    $NativeBuild=Join-Path $projectRoot 'native'
+    if(-not (Test-Path -LiteralPath $NativeBuild)){$NativeBuild=Join-Path $projectRoot '.local\native-build'}
+}
 $scripts=Join-Path $projectRoot 'scripts'
 if($Mode -eq 'Preview') {
     [pscustomobject]@{Mode='Preview';GameFilesWritten=$false;Cs2Root=[IO.Path]::GetFullPath($Cs2Root)
@@ -43,7 +48,7 @@ if(Get-Process -Name cs2 -ErrorAction SilentlyContinue){throw 'Close the existin
 if(Test-Path -LiteralPath $stateFile){throw 'Session already exists. Recover it, then use a new SessionDirectory.'}
 if(-not $BackupSnapshot -or -not (Test-Path -LiteralPath $BackupSnapshot -PathType Leaf)){throw 'Play requires a completed pre-loader backup ZIP.'}
 if(-not (Test-Path -LiteralPath $Loader -PathType Leaf)){throw 'Fetch the pinned ReShade runtime first.'}
-if(-not (Test-Path -LiteralPath (Join-Path $projectRoot '.local\native-build\CounterCraftProbe.addon64'))){throw 'Build the native adapter first.'}
+if(-not (Test-Path -LiteralPath (Join-Path $NativeBuild 'CounterCraftProbe.addon64'))){throw 'Build the native adapter first, or supply -NativeBuild.'}
 Push-Location $projectRoot
 try {
     # A short-lived health check cannot retain the exclusive Minecraft lease.
@@ -55,7 +60,7 @@ try {
         Failure='';RestoreFailure=''}
     $receipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $receiptFile -Encoding utf8
     try {
-        & (Join-Path $scripts 'prepare-cs2-lab.ps1') -Cs2Root $Cs2Root -Destination $candidate | Out-Null
+        & (Join-Path $scripts 'prepare-cs2-lab.ps1') -Cs2Root $Cs2Root -NativeBuild $NativeBuild -Destination $candidate | Out-Null
         & (Join-Path $scripts 'manage-cs2-loader.ps1') -Mode Install -Cs2Root $Cs2Root -Candidate $candidate -Loader $Loader -BackupSnapshot $BackupSnapshot -StateFile $stateFile -SteamLaunch | Out-Null
         $launch=@{StateFile=$stateFile;Gameplay=$true;Launch=$true}
         if($SteamExecutable){$launch.SteamExecutable=$SteamExecutable}

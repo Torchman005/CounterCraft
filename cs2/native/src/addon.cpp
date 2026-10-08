@@ -13,6 +13,7 @@
 #include <cmath>
 #include <algorithm>
 #include "mouse_input.hpp"
+#include "client_viewport.hpp"
 
 namespace {
 namespace api = reshade::api;
@@ -167,14 +168,14 @@ void input_frame(api::effect_runtime* runtime) {
     input.forward=double(runtime->is_key_down('W'))-double(runtime->is_key_down('S'));
     input.sideways=double(runtime->is_key_down('A'))-double(runtime->is_key_down('D'));
     input.jump=runtime->is_key_down(VK_SPACE);input.sneak=runtime->is_key_down(VK_SHIFT);input.sprint=runtime->is_key_down(VK_CONTROL);
-    // Some host input modes do not populate ReShade's right-button cache.
-    // Read held physical state only after the exact foreground-window guard.
-    input.attack=runtime->is_mouse_button_down(0) || (GetAsyncKeyState(VK_LBUTTON)&0x8000)!=0;
-    input.use=runtime->is_key_down('R') || runtime->is_mouse_button_down(2) || (GetAsyncKeyState(VK_RBUTTON)&0x8000)!=0;
+    // ReShade 6.8 implementation and header disagree on right/middle ordinal.
+    // Public Windows virtual-key codes avoid that ambiguity and blocked OS APIs.
+    input.attack=runtime->is_key_down(VK_LBUTTON);
+    input.use=runtime->is_key_down('R') || runtime->is_key_down(VK_RBUTTON);
     if(input.attack)++state->attack_frames;if(input.use)++state->use_frames;
     input.inventory=runtime->is_key_down('E');input.escape=runtime->is_key_down(VK_ESCAPE);
     input.drop=runtime->is_key_down('Q');input.swap=runtime->is_key_down('F');
-    input.pick=runtime->is_mouse_button_down(1) || (GetAsyncKeyState(VK_MBUTTON)&0x8000)!=0;
+    input.pick=runtime->is_key_down(VK_MBUTTON);
     const int steps=std::abs(wheel)>=120?wheel/120:wheel;
     if(steps) {state->scroll_total=std::clamp<int64_t>(state->scroll_total+steps,-1'000'000,1'000'000);
         if(!gui)state->selected_slot=((state->selected_slot-steps)%9+9)%9;}
@@ -182,8 +183,11 @@ void input_frame(api::effect_runtime* runtime) {
     for(int n=0;n<9;++n)if(runtime->is_key_pressed('1'+n))state->selected_slot=n;
     input.slot=state->selected_slot;
     if(gui && rect.right>0 && rect.bottom>0) {
-        state->cursor_x=std::clamp(state->cursor_x+double(dx)/rect.right,0.,1.);
-        state->cursor_y=std::clamp(state->cursor_y+double(dy)/rect.bottom,0.,1.);
+        const auto fit=cc::fit_client(rect.right,rect.bottom,frame->metadata.width,frame->metadata.height);
+        if(fit.width>0 && fit.height>0) {
+            state->cursor_x=std::clamp(state->cursor_x+double(dx)/fit.width,0.,1.);
+            state->cursor_y=std::clamp(state->cursor_y+double(dy)/fit.height,0.,1.);
+        }
     }
     input.mouse_x=state->cursor_x;input.mouse_y=state->cursor_y;
     state->receiver.submit_input(input);

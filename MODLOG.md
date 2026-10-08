@@ -905,7 +905,7 @@ launch, in-game test, rendering bridge, or complete port has been performed.
   cursorCount=1. Native left mining changed (27,128,-9) to air. Guest bow charged
   30 ticks, release cleared item use and inputId. Full world/GUI verifier moved
   3.255 blocks. CS2 R-key use placed oak_planks at (27,127,-9), confirmed by guest readback.
-  Mouse-right transport remains unresolved; R is the accepted alternative.
+  Mouse-right transport was resolved in the following checkpoint; R remains an alternative.
 - Added held vanilla key queries for mining/item use, remote rendered GUI pointer,
   drag/modifiers, wheel, drop/swap/pick. Extra controls not yet individually accepted.
 - Python 41 tests, Java 27 tests and native 14 CTest suites pass; loader fixtures
@@ -919,3 +919,33 @@ launch, in-game test, rendering bridge, or complete port has been performed.
   Steam sessions finished Restored with no restore failure.
 - World-depth fusion, host player/collision coupling, text input, aspect handling,
   broad survival/entities/redstone acceptance and reproducible packaging remain open.
+
+## Launcher, button mapping and alpha packaging checkpoint (2026-10-08)
+
+- ReShade 6.8's documented right/middle ordinals disagree with implementation.
+  Public VK_LBUTTON/VK_RBUTTON/VK_MBUTTON input replaces ordinal queries; actual
+  right-click held use placed oak_planks at (27,127,-9), independently inspected.
+- Actual guest pause neutralized input and disconnected; local resume established
+  a fresh session. Guest resize 960x540 -> 1280x720 continued uploads with zero
+  resource failures. No world-switch or memory-leak-free claim.
+- Added configured start.ps1, verified repository/Java/enable-flag and ancestry
+  checks, explicit guest ownership and startup-failure adoption of verified
+  descendants. Actual owned MC PID46272 + Steam CS2 PID45020 completed restore
+  and guest close; a later PID41760/PID4732 session did the same. Reused MC is
+  preserved. All production launch routes remain Steam -insecure.
+- Centered aspect-fit shader and fitted GUI delta scaling pass a native oracle.
+  Actual 1680x1050 host displays 1280x720 guest without stretching; screenshot
+  confirms square inventory icons and pointer landing on the oak_log cell.
+  This latter visual check alone is not a new inventory mutation acceptance.
+- Tests: Python bridge 41, native CTest 15/15, loader/supervisor fixtures 32,
+  guest launcher fixtures 3, packaging guards 3. Previous Java build has 27 tests.
+- Alpha builder allowlists source extensions/paths plus exactly own addon/jar;
+  checks jar identity/no Minecraft classes, hashes/size/duplicate/traversal and
+  unexpected files. Package includes notices, source, built mod/addon and recovery
+  docs; no game assets, ReShade runtime, saves, captures or dependency caches.
+  Initial package audit: 138 files, zero failures, one reviewed MODLOG path warning.
+- Both actual sessions restored exactly; latest universal-modder backup diff
+  added/removed/changed all empty. Private screenshots/logs remain ignored.
+- This packages the playable offline bridge, not a complete Minecraft port.
+  World-depth fusion, host collision/player coupling, text, broader vanilla
+  acceptance and unattributed D3D11 teardown warnings remain open.

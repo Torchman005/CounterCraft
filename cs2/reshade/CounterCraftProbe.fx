@@ -19,8 +19,13 @@ float4 ProbePS(float4 position : SV_Position, float2 uv : TEXCOORD) : SV_Target 
     float4 host = tex2D(HostSampler, uv);
     if (!CCActive || any(CCSize <= 0)) return host;
     if (CCFullClient) {
-        float4 color = tex2D(GuestSampler, float2(uv.x,1-uv.y));
-        float2 cursor = abs((uv-CCCursor)*CCSize);
+        float2 hostSize = float2(BUFFER_WIDTH, BUFFER_HEIGHT);
+        float scale = min(hostSize.x/CCSize.x, hostSize.y/CCSize.y);
+        float2 fit = CCSize*scale/hostSize;
+        float2 guest = (uv-(1-fit)*.5)/fit;
+        if(any(guest<0) || any(guest>1)) return float4(0,0,0,1);
+        float4 color = tex2D(GuestSampler, float2(guest.x,1-guest.y));
+        float2 cursor = abs((guest-CCCursor)*CCSize);
         if(CCGui && ((cursor.x<1.5 && cursor.y<7) || (cursor.y<1.5 && cursor.x<7)))return float4(1,1,1,1);
         return color;
     }

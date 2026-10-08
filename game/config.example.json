@@ -1,0 +1,8 @@
+{
+  "Cs2Root": "D:/SteamLibrary/steamapps/common/Counter-Strike Global Offensive",
+  "Gradle": "D:/tools/gradle-8.14/bin/gradle.bat",
+  "JavaHome": "D:/tools/jdk21",
+  "BackupSnapshot": "D:/backups/countercraft-before-loader.zip",
+  "World": "CounterCraft Lab",
+  "NullAudio": false
+}

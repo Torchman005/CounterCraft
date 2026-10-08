@@ -1,5 +1,15 @@
 # Native receiver and D3D11 lab
 
+Current gameplay status: full Minecraft client passthrough, held keyboard/mouse
+and inventory input work in real Steam offline CS2. Right mouse uses VK_RBUTTON
+to avoid ReShade 6.8's header/implementation ordinal disagreement. The view is
+aspect-fitted, with GUI movement using the same content size. Supervised
+`game/start.ps1` starts the isolated guest, launches through Steam and restores
+the temporary loader after exit. See [alpha installation](../../docs/alpha-install.md)
+and [input acceptance](../../docs/gameplay-input.md). Host world-depth fusion and
+player/collision coupling remain unfinished. The diagnostic history below
+describes earlier checkpoints, not the latest gameplay state.
+
 This is a verified independent renderer plus a **ReShade upload/diagnostic inset
 verified in actual offline CS2**. It is not a playable Minecraft port or verified
 CS2 scene compositor. The original OptiFine instance is not used. The temporary

@@ -4,7 +4,8 @@ This Fabric client mod accepts camera position, yaw/pitch and vertical FOV over
 local TCP, exports an on-demand world colour/depth bundle and streams bounded
 binary world frames with asynchronous GPU readback. Bounded main-thread actions
 expose player movement/look, mining, block use and inventory clicks over loopback;
-CS2 input routing is not yet connected. See [actions](../docs/gameplay-actions.md).
+CS2 held input, mouse/GUI controls and full-client frame routing are connected.
+See [held input](../docs/gameplay-input.md) and [actions](../docs/gameplay-actions.md).
 GPU textures are not shared.
 
 **Validation status:** the full Fabric build succeeded and produced the mod jar.
@@ -140,4 +141,6 @@ receiver times out rather than block rendering. Reconnect creates a new session.
 Streaming preserves GL bottom-to-top row order, unlike top-to-bottom diagnostic
 PNG bundles. Depth remains non-reversed OpenGL window-z. Camera/matrices are
 frozen at issue time. This is a CPU-copy prototype for a future compositor;
-there is no CS2 client integration yet. See [binary layout and timing](../docs/frame-stream.md).
+the CS2 ReShade adapter receives/uploads these frames. Full-client mode includes
+hand/HUD/GUI color and earlier world depth, so it cannot be used for world-depth
+fusion. See [binary layout and timing](../docs/frame-stream.md).

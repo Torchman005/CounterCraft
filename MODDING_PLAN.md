@@ -1,5 +1,22 @@
 # CounterCraft offline modding plan
 
+## Current checkpoint (2026-10-08, alpha packaging)
+
+Full-client passthrough and continuous CS2 input are now implemented and tested.
+Right/left mouse, movement/look, creative inventory and vanilla guest crafting
+have actual acceptance evidence. Pause/resume and guest resize reconnect with
+neutral input and zero observed resource failures. Full owned-client startup,
+Steam startup, exit, hash-guarded loader restore and owned MC close passed.
+Aspect-fit display and GUI pointer alignment were visually verified in a
+1680x1050 CS2 client. An allowlisted source-assisted alpha package contains only
+own artifacts/source/docs, with integrity manifests and recovery instructions.
+
+The complete MC-in-CS2 world integration is **not finished**. Remaining work:
+host world-depth composition and collision/player coupling, text input, broader
+survival/entity/redstone gameplay acceptance and performance/lifetime analysis.
+The round estimate and implementation statuses below are historical; they are
+not a current completion forecast. See README and MODLOG for current evidence.
+
 - Install: `D:\steam1\steamapps\common\Counter-Strike Global Offensive` (Steam app 730, build 25738536; reinstalled 2026-10-08)
 - Engine: Source 2; client files contain `game/core/gameinfo.gi` and `game/csgo/gameinfo.gi`
 - Minecraft: `D:\pcl2\Release 2.8.3`, requested instance `1.20.1-OptiFine_I6`

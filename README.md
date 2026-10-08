@@ -4,7 +4,7 @@
 
 **当前是可操作的离线桥接原型，尚未完成两个世界的融合。** Minecraft 1.20.1 Fabric 在独立进程运行，CS2 的 ReShade 插件显示完整 MC 画面、手部、HUD 和库存，并传递键鼠输入。移动由 MC 原版碰撞和重力处理；这不是 MC 方块已经进入 Dust2，也不支持官方匹配。
 
-已实测：CS2 中的移动、鼠标转向、创造库存取物、挖除与 R 键放置；MC 动作接口的放置、挖掘、2×2 原版合成；持续拉弓和释放。新加入滚轮、丢弃、副手交换、库存拖动与修饰键，未逐项完成 CS2 场景验收。暂停、断流和换世界会释放输入；玩法接收端重新握手，不复用旧 epoch。
+已实测：CS2 中的移动、鼠标转向、创造库存取物、左键挖除、右键和 R 键放置；MC 动作接口的放置、挖掘、2×2 原版合成；持续拉弓和释放。新加入滚轮、丢弃、副手交换、库存拖动与修饰键，未逐项完成 CS2 场景验收。暂停、断流和换世界会释放输入；玩法接收端重新握手，不复用旧 epoch。实际暂停/恢复及 MC 窗口 960×540 → 1280×720 调整已通过。
 
 现有 PCL/OptiFine 实例和存档未修改。使用隔离的 Fabric 1.20.1 开发实例，不能与 OptiFine 混用。帧传输是有界 CPU 拷贝原型，20 FPS 上限，不承诺 60 FPS。CS2 世界深度、相机读回和 GPU 遮挡实验仍是单独诊断能力，尚未接入玩法融合。退出时的 D3D11 引用计数提示仍未归因。
 
@@ -20,7 +20,20 @@ python -m bridge.verify_input  # 会移动玩家并开关库存，仅在测试�
 python -m unittest discover -s bridge -p 'test_*.py' -v
 ```
 
-推荐用受监督的入口：
+推荐使用配置启动器（先构建，创建独立世界并完成安装前备份）：
+
+```powershell
+New-Item -ItemType Directory -Force .local
+Copy-Item game/config.example.json .local/countercraft-machine.json
+# 编辑该 JSON，填入本机路径；不要提交机器配置。
+./scripts/fetch-reshade-runtime.ps1
+./game/start.ps1           # 默认预览
+./game/start.ps1 -Launch   # 启动独立 MC 和离线 CS2，监督退出恢复
+```
+
+启动器只复用已核验的仓库开发客户端。它自动关闭自己启动的 MC，保留预先运行的客户端。每次启动生成新的恢复记录；MC 世界需预先存在，不自动创建或导入存档。
+
+若 MC 已在运行，可用单独的受监督入口：
 
 ```powershell
 ./game/play.ps1 -Cs2Root '<CS2 目录>'  # 默认只预览
@@ -32,6 +45,7 @@ MC 客户端须先进入独立单人世界。启动必须走已运行的 Steam `
 单独的 `scripts/launch-cs2-lab.ps1 -Gameplay -Launch` 仍保留供诊断使用；它需要已记录的加载器状态，退出后手动恢复。
 
 - [连续输入和画面协议](docs/gameplay-input.md)
+- [初版包、安装与恢复](docs/alpha-install.md)
 - [动作和合成协议](docs/gameplay-actions.md)
 - [帧流协议](docs/frame-stream.md)
 - [相机桥接实验](docs/camera-relay.md)
