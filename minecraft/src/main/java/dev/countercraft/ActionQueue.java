@@ -19,7 +19,7 @@ public final class ActionQueue {
     public static Action parse(JsonObject m) {
         long id = integer(m, "id"), epoch = integer(m, "epoch");
         String kind = m.get("action").getAsString();
-        if (id < 0 || epoch < 0 || !Set.of("look", "break", "place", "select", "inventory", "click", "inspect", "move", "creative", "target").contains(kind))
+        if (id < 0 || epoch < 0 || !Set.of("look", "break", "place", "select", "inventory", "click", "inspect", "move", "creative", "target", "ui", "entities").contains(kind))
             throw new IllegalArgumentException("Unknown action or negative id/epoch");
         double x = 0, y = 0, z = 0;
         float yaw = 0, pitch = 0;
@@ -61,6 +61,20 @@ public final class ActionQueue {
             long value = integer(m, "count");
             if (value < 1 || value > 64) throw new IllegalArgumentException("Invalid item count");
             count = (int) value;
+        }
+        if (kind.equals("ui")) {
+            if(m.has("text")) {
+                var value=m.get("text");
+                if(!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) throw new IllegalArgumentException("Expected UI string");
+                item=value.getAsString();
+                if(item.length()>64 || item.codePoints().anyMatch(c -> c<32 || c==127 || (c>=0xD800 && c<=0xDFFF)))
+                    throw new IllegalArgumentException("UI text outside bounds");
+            }
+            long key=m.has("key")?integer(m,"key"):0, modifiers=m.has("modifiers")?integer(m,"modifiers"):0;
+            if(!Set.of(0L,47L,84L,256L,257L,258L,259L,261L,262L,263L,264L,265L,268L,269L).contains(key)
+                || modifiers<0 || modifiers>7 || (key!=0 && !item.isEmpty()) || (key==0 && item.isEmpty()))
+                throw new IllegalArgumentException("Invalid UI key/modifiers or empty event");
+            button=(int)key;slot=(int)modifiers;
         }
         return new Action(id, epoch, kind, x, y, z, yaw, pitch, face, slot, button, item, count);
     }

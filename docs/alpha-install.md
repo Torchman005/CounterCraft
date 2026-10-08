@@ -1,4 +1,4 @@
-# CounterCraft 0.1.0-alpha.1
+# CounterCraft 0.1.0-alpha.2
 
 这是源代码辅助启动的 Windows 离线桥接初版包。CS2 显示完整 Minecraft
 客户端画面并转发键鼠；真实 MC 负责世界、方块、生物、红石、合成和碰撞。
@@ -55,8 +55,8 @@ MC 由启动器开启时，在 CS2 退出后自动关闭；复用已有仓库 MC
 
 ## 操作与恢复
 
-WASD 移动；鼠标转向；左键挖矿/攻击，右键使用/放置，R 为右键替代；
-E 打开库存，Esc 关闭库存；数字键/滚轮选物；Space/Shift/Ctrl 跳跃/潜行/冲刺；
+WASD 移动；鼠标转向；左键挖矿/攻击，右键使用/放置，R 是世界视图中的替代键；
+E 打开库存，Esc 关闭库存；T 聊天，/ 命令；数字键/滚轮选物；Space/Shift/Ctrl 跳跃/潜行/冲刺；
 Q 丢弃，Ctrl+Q 丢整组，F 交换副手，中键选取方块。F8 返回 CS2 画面并释放 MC
 输入，再按恢复。库存支持点击、右键分物、拖动和 Shift/Ctrl 修饰。
 
@@ -78,12 +78,18 @@ Q 丢弃，Ctrl+Q 丢整组，F 交换副手，中键选取方块。F8 返回 CS
 python -m unittest discover -s bridge -p 'test_*.py'
 python scripts/test-package.py
 python scripts/test-game-start.py
+# MC 运行、CS2 关闭时，在有作弊权限的可丢弃创造测试世界执行：
+python -m bridge.verify_vanilla --allow-lab-commands
 ```
 
 实际验收和未验收功能见根目录 README、MODLOG 和 gameplay-input 文档。
 传输上限 20 FPS，CPU 拷贝且无 GPU 共享；短促按键可能被采样遗漏。
-窗口保持 MC 原比例。聊天/搜索文字和输入法暂未转发；MC 暂停需要在 MC 窗口本地
+窗口保持 MC 原比例。支持普通文字和基本编辑键，尚不支持输入法组合、剪贴板和长按重复；MC 暂停需要在 MC 窗口本地
 恢复。其他叠加层可能截取输入。退出时 D3D11 引用计数提示仍待归因。
+
+原版验收命令会暂时创建两个方块和一只唯一标记的猪，测试红石、攻击和生存伤害；
+最后恢复创造模式、清理其方块/实体并复原视角。角色会受伤，可能出现掉落物，
+不能用于重要存档，也不声称回滚存档中的全部变化。结果只写入本地 `.local`。
 
 ## 开发打包
 

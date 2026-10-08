@@ -22,6 +22,30 @@ public final class PlayerActions {
         var p = c.player;
         JsonObject result = new JsonObject();
         switch (a.kind()) {
+            case "ui" -> {
+                boolean applied=false;
+                if(c.currentScreen==null && (a.button()==84 || a.button()==47)) {
+                    c.setScreen(new net.minecraft.client.gui.screen.ChatScreen(a.button()==47?"/":""));applied=true;
+                } else if(c.currentScreen!=null) {
+                    if(a.button()!=0)applied=c.currentScreen.keyPressed(a.button(),0,a.slot());
+                    else for(char character:a.item().toCharArray())applied=c.currentScreen.charTyped(character,a.slot()) || applied;
+                }
+                result.addProperty("applied",applied);
+                result.addProperty("screen",c.currentScreen==null?"world":c.currentScreen.getClass().getSimpleName());
+            }
+            case "entities" -> {
+                JsonArray entities=new JsonArray();
+                var nearby=c.world.getOtherEntities(p,p.getBoundingBox().expand(8),e -> e instanceof net.minecraft.entity.LivingEntity || e instanceof net.minecraft.entity.ItemEntity);
+                for(var entity:nearby.stream().limit(32).toList()) {
+                    JsonObject entry=new JsonObject();entry.addProperty("id",entity.getId());
+                    entry.addProperty("type",Registries.ENTITY_TYPE.getId(entity.getType()).toString());
+                    JsonArray at=new JsonArray();at.add(entity.getX());at.add(entity.getY());at.add(entity.getZ());entry.add("position",at);
+                    if(entity instanceof net.minecraft.entity.LivingEntity living)entry.addProperty("health",living.getHealth());
+                    if(entity instanceof net.minecraft.entity.ItemEntity dropped){entry.addProperty("item",Registries.ITEM.getId(dropped.getStack().getItem()).toString());entry.addProperty("count",dropped.getStack().getCount());}
+                    entities.add(entry);
+                }
+                result.add("entities",entities);result.addProperty("truncated",nearby.size()>32);result.addProperty("radius",8);
+            }
             case "target" -> {
                 double reach = c.interactionManager.getReachDistance();
                 var ray = c.world.raycast(new RaycastContext(p.getEyePos(), p.getEyePos().add(p.getRotationVec(1).multiply(reach)),
@@ -102,6 +126,9 @@ public final class PlayerActions {
                 }
                 result.addProperty("block", Registries.BLOCK.getId(c.world.getBlockState(pos).getBlock()).toString());
                 result.addProperty("air", c.world.isAir(pos));
+                JsonObject properties=new JsonObject();
+                c.world.getBlockState(pos).getEntries().forEach((property,value)->properties.addProperty(property.getName(),value.toString()));
+                result.add("properties",properties);
             }
             default -> throw new IllegalArgumentException("Unknown action");
         }

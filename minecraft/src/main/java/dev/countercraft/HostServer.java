@@ -99,6 +99,7 @@ public final class HostServer implements AutoCloseable {
                     reply.addProperty("capture", capture != null);
                     reply.addProperty("stream", stream != null);
                     reply.addProperty("actions", actions != null);
+                    reply.addProperty("ui", actions != null);
                     reply.addProperty("input", controls != null);
                 } else if (type.equals("status") || type.equals("ping")) {
                     BridgeState.World w = state.world();

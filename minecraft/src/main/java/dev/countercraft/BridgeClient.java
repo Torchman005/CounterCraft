@@ -69,6 +69,10 @@ public final class BridgeClient implements ClientModInitializer {
             player.addProperty("activeItem",net.minecraft.registry.Registries.ITEM.getId(client.player.getActiveItem().getItem()).toString());
             player.addProperty("hunger",client.player.getHungerManager().getFoodLevel());
             player.addProperty("creative",client.player.getAbilities().creativeMode);
+            player.addProperty("sprinting",client.player.isSprinting());
+            player.addProperty("offhand",net.minecraft.registry.Registries.ITEM.getId(client.player.getOffHandStack().getItem()).toString());
+            player.addProperty("cursorCount",client.player.currentScreenHandler.getCursorStack().getCount());
+            player.addProperty("cursorItem",net.minecraft.registry.Registries.ITEM.getId(client.player.currentScreenHandler.getCursorStack().getItem()).toString());
             player.addProperty("item",net.minecraft.registry.Registries.ITEM.getId(client.player.getMainHandStack().getItem()).toString());
             player.addProperty("inputUse",previousInput!=null && previousInput.use());
             if(client.crosshairTarget instanceof net.minecraft.util.hit.BlockHitResult hit) {
@@ -105,9 +109,13 @@ public final class BridgeClient implements ClientModInitializer {
         boolean inventoryEdge = next.inventory() && (previousInput == null || !previousInput.inventory());
         boolean escapeEdge = next.escape() && (previousInput == null || !previousInput.escape());
         if (c.currentScreen != null) {
-            if (c.currentScreen instanceof HandledScreen<?> && (inventoryEdge || escapeEdge)) c.player.closeHandledScreen();
+            if (c.currentScreen instanceof HandledScreen<?> && escapeEdge) c.player.closeHandledScreen();
             else {
                 var screen=c.currentScreen;
+                // Vanilla decides whether E closes a container or is consumed by
+                // its focused search field. Do not close creative search directly.
+                if(inventoryEdge && screen instanceof HandledScreen<?>)screen.keyPressed(69,0,(next.sneak()?1:0)|(next.sprint()?2:0));
+                if(c.currentScreen!=screen){previousInput=next;return;}
                 double x = next.mouseX()*c.getWindow().getScaledWidth(), y = next.mouseY()*c.getWindow().getScaledHeight();
                 screen.mouseMoved(x, y);
                 if(previousInput!=null && next.scroll()!=previousInput.scroll())
@@ -125,7 +133,7 @@ public final class BridgeClient implements ClientModInitializer {
             }
         } else if (c.currentScreen == null) {
             c.player.setYaw(next.yaw()); c.player.setPitch(next.pitch());
-            c.player.getInventory().selectedSlot = next.slot(); c.player.setSprinting(next.sprint());
+            c.player.getInventory().selectedSlot = next.slot();
             if(next.drop() && (previousInput==null || !previousInput.drop()))c.player.dropSelectedItem(next.sprint());
             if(next.swap() && (previousInput==null || !previousInput.swap()))c.getNetworkHandler().sendPacket(
                 new net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket(

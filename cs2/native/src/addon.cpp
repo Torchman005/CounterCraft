@@ -96,6 +96,7 @@ struct AddonState {
             {"camerasSent",status.cameras_sent},{"cameraReleases",status.camera_releases},
             {"cameraFramesMatched",status.cameras_rendered}};
         report["gameplay"]=gameplay;report["inputsSent"]=status.inputs_sent;report["reconnects"]=status.reconnects;
+        report["uiEventsSent"]=status.ui_sent;report["uiEventsDropped"]=status.ui_dropped;
         report["sampledMouseChanges"]=sampled_events.load();report["inputFrames"]=input_frames.load();
         report["sampledCursor"]={sampled_x.load(),sampled_y.load()};
         report["attackInputFrames"]=attack_frames.load();report["useInputFrames"]=use_frames.load();
@@ -146,13 +147,34 @@ AddonState* state = nullptr;
 void input_frame(api::effect_runtime* runtime) {
     if(!state->gameplay)return;
     auto window=static_cast<HWND>(runtime->get_hwnd());
-    if(GetForegroundWindow()!=window || !state->receiver.stats().connected) {state->sampled_mouse.reset();state->view_seeded=false;return;}
+    if(GetForegroundWindow()!=window || !state->receiver.stats().connected) {state->sampled_mouse.reset();state->view_seeded=false;state->receiver.clear_ui();return;}
     if(runtime->is_key_pressed(VK_F8)) {state->input_enabled=!state->input_enabled;state->sampled_mouse.reset();state->view_seeded=false;}
-    if(!state->input_enabled)return;
+    if(!state->input_enabled){state->receiver.clear_ui();return;}
     const auto frame=state->receiver.latest();
     if(!frame)return;
     if(!state->view_seeded){state->yaw=frame->metadata.rotation[0];state->pitch=frame->metadata.rotation[1];state->view_seeded=true;}
     const bool gui=frame && frame->metadata.gui_open;
+    const int modifiers=(runtime->is_key_down(VK_SHIFT)?1:0)|(runtime->is_key_down(VK_CONTROL)?2:0)|(runtime->is_key_down(VK_MENU)?4:0);
+    auto ui=[&](int key,const std::string& text={}){state->receiver.submit_ui({text,key,modifiers,cc::monotonic_ns()});};
+    if(!gui) {
+        if(runtime->is_key_pressed('T'))ui(84);
+        if(runtime->is_key_pressed(VK_OEM_2) && !modifiers)ui(47);
+    } else {
+        const std::pair<int,int> keys[]={{VK_RETURN,257},{VK_TAB,258},{VK_BACK,259},{VK_DELETE,261},{VK_RIGHT,262},{VK_LEFT,263},{VK_DOWN,264},{VK_UP,265},{VK_HOME,268},{VK_END,269}};
+        for(auto [vk,key]:keys)if(runtime->is_key_pressed(vk))ui(key);
+        BYTE keyboard[256]{};
+        for(int vk=0;vk<256;++vk)if(runtime->is_key_down(vk))keyboard[vk]=0x80;
+        keyboard[VK_CAPITAL]=BYTE(GetKeyState(VK_CAPITAL)&1);
+        const auto layout=GetKeyboardLayout(GetWindowThreadProcessId(window,nullptr));
+        for(int vk=32;vk<=222;++vk) {
+            if(!((vk>=48 && vk<=90) || vk==VK_SPACE || (vk>=186 && vk<=192) || (vk>=219 && vk<=222)) || !runtime->is_key_pressed(vk))continue;
+            wchar_t characters[8]{};const int count=ToUnicodeEx(UINT(vk),MapVirtualKeyExW(UINT(vk),MAPVK_VK_TO_VSC,layout),keyboard,characters,8,4,layout);
+            if(count>0 && count<=8 && !(modifiers&6)) {
+                char utf8[32]{};const int bytes=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,characters,count,utf8,32,nullptr,nullptr);
+                if(bytes>0)ui(0,std::string(utf8,size_t(bytes)));
+            }
+        }
+    }
     int dx=0,dy=0;
     uint32_t px=0,py=0;int16_t wheel=0;runtime->get_mouse_cursor_position(&px,&py,&wheel);
     RECT rect{};GetClientRect(window,&rect);POINT center{rect.right/2,rect.bottom/2};ClientToScreen(window,&center);
@@ -171,7 +193,9 @@ void input_frame(api::effect_runtime* runtime) {
     // ReShade 6.8 implementation and header disagree on right/middle ordinal.
     // Public Windows virtual-key codes avoid that ambiguity and blocked OS APIs.
     input.attack=runtime->is_key_down(VK_LBUTTON);
-    input.use=runtime->is_key_down('R') || runtime->is_key_down(VK_RBUTTON);
+    // R is a world-only alternative. In GUI text it must remain a character,
+    // otherwise ChatScreen right-clicks a suggestion while the user types r.
+    input.use=(!gui && runtime->is_key_down('R')) || runtime->is_key_down(VK_RBUTTON);
     if(input.attack)++state->attack_frames;if(input.use)++state->use_frames;
     input.inventory=runtime->is_key_down('E');input.escape=runtime->is_key_down(VK_ESCAPE);
     input.drop=runtime->is_key_down('Q');input.swap=runtime->is_key_down('F');

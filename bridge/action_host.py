@@ -51,7 +51,13 @@ def main():
     click.add_argument("button", type=int, choices=(0, 1))
     sub.add_parser("inventory")
     sub.add_parser("target")
+    sub.add_parser("entities")
+    ui = sub.add_parser("ui")
+    event = ui.add_mutually_exclusive_group(required=True)
+    event.add_argument("--text"); event.add_argument("--key",type=int)
+    ui.add_argument("--modifiers",type=int,default=0)
     args = vars(parser.parse_args()); port, kind = args.pop("port"), args.pop("action")
+    args = {key:value for key,value in args.items() if value is not None}
     with socket.create_connection(("127.0.0.1", port), timeout=3) as client, client.makefile("rb") as reader:
         print(json.dumps(Actions(client, reader).act(kind, **args)))
 

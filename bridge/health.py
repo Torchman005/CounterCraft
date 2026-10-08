@@ -9,7 +9,7 @@ def check(port=37122):
     with socket.create_connection(("127.0.0.1", port), timeout=3) as client, client.makefile("rb") as reader:
         ready = request(client, reader, {"type": "hello", "role": "test"})
         status = request(client, reader, {"type": "status"})
-        if not all(ready.get(key) is True for key in ("stream", "input", "actions")):
+        if not all(ready.get(key) is True for key in ("stream", "input", "actions", "ui")):
             raise RuntimeError("Guest lacks CounterCraft gameplay capabilities")
         if status.get("offline") is not True or status.get("player", {}).get("screen") != "world":
             raise RuntimeError("Enter an unpaused singleplayer world and close all screens")

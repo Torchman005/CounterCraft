@@ -6,6 +6,17 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ActionQueueTest {
+    @Test void uiAndEntityRequestsAreBoundedAndUnambiguous() {
+        var text=ActionQueue.parse(JsonParser.parseString("{\"id\":1,\"epoch\":1,\"action\":\"ui\",\"text\":\"hello 世界\"}").getAsJsonObject());
+        assertEquals("hello 世界",text.item());
+        var key=ActionQueue.parse(JsonParser.parseString("{\"id\":1,\"epoch\":1,\"action\":\"ui\",\"key\":257,\"modifiers\":2}").getAsJsonObject());
+        assertEquals(257,key.button());
+        assertEquals("entities",ActionQueue.parse(JsonParser.parseString("{\"id\":1,\"epoch\":1,\"action\":\"entities\"}").getAsJsonObject()).kind());
+        for(String fields:List.of("\"text\":\"\"", "\"key\":999", "\"text\":1", "\"key\":257,\"text\":\"x\"", "\"key\":257,\"modifiers\":8", "\"text\":\""+"a".repeat(65)+"\"", "\"text\":\"\\u0000\"")) {
+            var invalid=JsonParser.parseString("{\"id\":1,\"epoch\":1,\"action\":\"ui\","+fields+"}").getAsJsonObject();
+            assertThrows(IllegalArgumentException.class,()->ActionQueue.parse(invalid));
+        }
+    }
     private static final long NOW = 2_000_000_000L;
     private static BridgeState.World world(long epoch, boolean offline, long now) {
         return new BridgeState.World(epoch, offline, 0, 64, 0, now);

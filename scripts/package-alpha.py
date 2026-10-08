@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.0-alpha.1"
+VERSION = "0.1.0-alpha.2"
 ROOT_FILES = {"README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "MODLOG.md",
               "MODDING_PLAN.md", "CONTRIBUTING.md", ".gitignore"}
 SOURCE_DIRS = {"bridge", "cs2", "minecraft", "game", "docs", "scripts"}
@@ -64,7 +64,8 @@ def verify(directory):
 
 def build(destination, addon, jar):
     destination = destination.resolve()
-    if destination.exists() or destination.with_suffix(".zip").exists():
+    archive_path = destination.parent / (destination.name + ".zip")
+    if destination.exists() or archive_path.exists():
         raise ValueError("Use a fresh package destination; existing artifacts are preserved")
     if destination == ROOT or ROOT.is_relative_to(destination):
         raise ValueError("Package destination may not contain the source checkout")
@@ -104,7 +105,6 @@ def build(destination, addon, jar):
                 "files": entries}
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf8")
     result = verify(destination)
-    archive_path = destination.with_suffix(".zip")
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in sorted([entry["path"] for entry in entries] + ["manifest.json"]):
             archive.write(destination / name, f"CounterCraft-{VERSION}/{name}")

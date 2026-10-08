@@ -11,14 +11,23 @@ int main(int argc, char** argv) {
         const auto port = std::stoul(argv[1]);
         const double seconds = std::stod(argv[2]);
         if (!port || port > 65535 || seconds <= 0 || seconds > 10) throw std::runtime_error("Probe range");
-        const bool gameplay=argc==4 && std::string(argv[3])=="gameplay";
+        const auto mode=argc==4?std::string(argv[3]):std::string{};
+        const bool ui=mode=="ui" || mode=="ui-stale";
+        const bool gameplay=mode=="gameplay" || ui;
         cc::Receiver receiver(uint16_t(port), 20,gameplay);
         const auto began = cc::monotonic_ns();
         uint64_t observed = 0, last = 0;
         bool saw_depth = false;
         unsigned camera_stage=0;
+        bool ui_issued=false;
         while (double(cc::monotonic_ns() - began) / 1e9 < seconds) {
             const auto elapsed=double(cc::monotonic_ns()-began)/1e9;
+            if(ui && !ui_issued && receiver.stats().connected && elapsed>.08) {
+                auto now=cc::monotonic_ns();
+                receiver.submit_ui({"hello",0,0,now-(mode=="ui-stale"?500'000'000:0)});
+                if(mode=="ui")receiver.submit_ui({"",257,0,now});
+                ui_issued=true;
+            }
             if(gameplay && elapsed>.08 && elapsed<.35) {
                 cc::Receiver::Input input;input.forward=1;input.captured_ns=cc::monotonic_ns();receiver.submit_input(input);
             }
@@ -50,6 +59,7 @@ int main(int argc, char** argv) {
             {"camerasSent",status.cameras_sent},{"cameraReleases",status.camera_releases},
             {"cameraFramesMatched",status.cameras_rendered},
             {"inputsSent",status.inputs_sent},{"reconnects",status.reconnects},
+            {"uiEventsSent",status.ui_sent},{"uiEventsDropped",status.ui_dropped},
             {"stopMs",double(cc::monotonic_ns()-stop_at)/1e6}}.dump() << '\n';
         return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

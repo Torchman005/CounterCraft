@@ -53,7 +53,7 @@ class Fixture:
         self.errors = []
         self.cameras = []
         self.releases = 0
-        self.inputs=[];self.full=False
+        self.inputs=[];self.full=False;self.actions=[]
         self.camera_arrived = threading.Event()
         self.control = self.listen()
         self.binary = self.listen()
@@ -78,7 +78,7 @@ class Fixture:
                 for line in reader:
                     message = json.loads(line)
                     kind = message["type"]
-                    if kind == "hello": response = {"type":"ready", "stream":True, "input":True}
+                    if kind == "hello": response = {"type":"ready", "stream":True, "input":True, "ui": self.scenario!='old-guest'}
                     elif kind == "ping":
                         pings += 1
                         response = {"type":"status", "serverMonotonicNanos":time.perf_counter_ns()+CLOCK_OFFSET,
@@ -94,6 +94,9 @@ class Fixture:
                     elif kind == 'input':
                         self.inputs.append(message)
                         response=dict(type='input-ack',id=message['id']+(1 if self.scenario=='input-bad-ack' else 0),epoch=7)
+                    elif kind == 'action':
+                        self.actions.append(message)
+                        response=dict(type='action-ack',action=message['action'],id=message['id']+(1 if self.scenario=='ui-bad-ack' else 0),epoch=7)
                     elif kind == 'camera':
                         self.cameras.append(message)
                         self.camera_arrived.set()
@@ -148,6 +151,41 @@ class Fixture:
 
 
 class NativeSocketTests(unittest.TestCase):
+    def test_old_guest_fails_before_stream_or_input(self):
+        fixture=Fixture('old-guest');fixture.start()
+        try:
+            result=subprocess.run([str(PROBE),str(fixture.port),'.3','gameplay'],capture_output=True,text=True,timeout=5,check=True)
+            report=json.loads(result.stdout)
+            self.assertIn('Restart Minecraft',report['failure'])
+            self.assertEqual(report['received'],0);self.assertEqual(fixture.inputs,[])
+        finally:fixture.close()
+    def test_ui_fifo_ack_and_expiry_while_binary_waits(self):
+        for mode in ('ui','ui-stale'):
+            fixture=Fixture('valid');fixture.start()
+            try:
+                result=subprocess.run([str(PROBE),str(fixture.port),'.8',mode],capture_output=True,text=True,timeout=5,check=True)
+                report=json.loads(result.stdout)
+                self.assertEqual(report['failure'],'')
+                if mode=='ui':
+                    self.assertEqual(report['uiEventsSent'],2)
+                    self.assertEqual([m['id'] for m in fixture.actions],[1,2])
+                    self.assertEqual(fixture.actions[0]['text'],'hello')
+                    self.assertEqual(fixture.actions[1]['key'],257)
+                else:
+                    self.assertEqual(report['uiEventsSent'],0)
+                    self.assertEqual(report['uiEventsDropped'],1)
+                    self.assertEqual(fixture.actions,[])
+            finally: fixture.close()
+
+    def test_ui_wrong_ack_terminates_without_replay(self):
+        fixture=Fixture('ui-bad-ack');fixture.start()
+        try:
+            result=subprocess.run([str(PROBE),str(fixture.port),'.8','ui'],capture_output=True,text=True,timeout=5,check=True)
+            report=json.loads(result.stdout)
+            self.assertIn('UI action acknowledgement mismatch',report['failure'])
+            self.assertEqual(report['uiEventsSent'],0)
+            self.assertEqual(len(fixture.actions),1)
+        finally:fixture.close()
     def test_gameplay_input_and_expiry_release(self):
         fixture=Fixture('valid');fixture.start()
         try:

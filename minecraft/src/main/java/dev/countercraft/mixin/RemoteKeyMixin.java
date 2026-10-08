@@ -17,5 +17,6 @@ public abstract class RemoteKeyMixin {
         var options=MinecraftClient.getInstance().options;
         if((Object)this==options.attackKey)result.setReturnValue(input.attack());
         if((Object)this==options.useKey)result.setReturnValue(input.use());
+        if((Object)this==options.sprintKey)result.setReturnValue(input.sprint());
     }
 }

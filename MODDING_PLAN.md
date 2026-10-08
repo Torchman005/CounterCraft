@@ -1,5 +1,21 @@
 # CounterCraft offline modding plan
 
+## Current checkpoint (2026-10-09, alpha.2)
+
+Basic text/editing events are now implemented and native chat + Enter is accepted
+in actual CS2. A FIFO/epoch/expiry/ack protocol avoids text loss in held-state
+sampling; IME/clipboard/typematic remain absent. Guest-only vanilla acceptance
+confirms redstone lit/unlit, live pig damage and survival health, with disposable
+fixture cleanup; death UI Tab/Enter also respawned the real player. These do not
+prove a CS2-native redstone interaction or host entities/collision coupling.
+Sprint now goes through vanilla key handling. Earlier native command testing
+exposed R-as-right-click corruption in chat, fixed by restricting R to world view.
+
+The offline bridge alpha can be built, launched, operated, restored and packaged.
+The original complete-port objective remains open: host world-depth integration,
+cross-game player/collision/chunk semantics, broader control/survival acceptance,
+text composition and performance/lifetime work. Do not conflate these scopes.
+
 ## Current checkpoint (2026-10-08, alpha packaging)
 
 Full-client passthrough and continuous CS2 input are now implemented and tested.

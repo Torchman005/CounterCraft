@@ -140,9 +140,18 @@ void Receiver::run() {
         session();
         if(!gameplay_ || stop_)return;
         for(int i=0;i<50 && !stop_;++i)std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        {std::lock_guard lock(mutex_);++stats_.reconnects;input_.reset();}
+        {std::lock_guard lock(mutex_);++stats_.reconnects;input_.reset();stats_.ui_dropped+=ui_.size();ui_.clear();}
     }while(!stop_);
 }
+void Receiver::submit_ui(UiEvent event) {
+    if(!gameplay_)return;
+    if(event.text.size()>256 || event.modifiers<0 || event.modifiers>7 || event.captured_ns<=0)
+        throw std::runtime_error("Invalid UI event");
+    std::lock_guard lock(mutex_);
+    if(!stats_.connected || ui_.size()>=64){++stats_.ui_dropped;return;}
+    ui_.push_back(std::move(event));
+}
+void Receiver::clear_ui() {std::lock_guard lock(mutex_);stats_.ui_dropped+=ui_.size();ui_.clear();}
 void Receiver::session() {
     try {
         Winsock winsock;
@@ -150,6 +159,7 @@ void Receiver::session() {
         json ready = control.request({{"type","hello"},{"role","test"}},stop_);
         if (ready.at("type") != "ready" || ready.at("stream") != true) throw std::runtime_error("No Minecraft frame stream");
         if(gameplay_ && !ready.value("input",false))throw std::runtime_error("No Minecraft gameplay input provider");
+        if(gameplay_ && !ready.value("ui",false))throw std::runtime_error("Restart Minecraft with UI-event capable CounterCraft mod");
         int64_t best_rtt = INT64_MAX;
         json status;
         for (int i = 0; i < 5; ++i) {
@@ -175,6 +185,7 @@ void Receiver::session() {
         int64_t next_ping = monotonic_ns();
         int64_t next_camera = monotonic_ns();
         int64_t next_input = 0; uint64_t input_id=0; bool input_active=false;
+        int64_t next_ui=0;uint64_t action_id=0;
         uint64_t sent_camera=0;
         bool camera_active=false,anchored=false;
         std::array<double,3> source_anchor{},guest_anchor{};
@@ -186,6 +197,22 @@ void Receiver::session() {
         std::deque<ExpectedPose> expected_poses;
         auto heartbeat = [&] {
             const auto now=monotonic_ns();
+            if(gameplay_ && now>=next_ui) {
+                std::optional<UiEvent> event;
+                {std::lock_guard lock(mutex_);
+                    while(!ui_.empty() && (now<ui_.front().captured_ns || now-ui_.front().captured_ns>=250'000'000)) {ui_.pop_front();++stats_.ui_dropped;}
+                    if(!ui_.empty()){event=std::move(ui_.front());ui_.pop_front();}
+                }
+                if(event) {
+                    auto message=json{{"type","action"},{"action","ui"},{"id",++action_id},{"epoch",epoch},{"modifiers",event->modifiers}};
+                    if(event->key)message["key"]=event->key;else message["text"]=event->text;
+                    const auto ack=control.request(message,stop_);
+                    if(ack.at("type")!="action-ack" || ack.at("id")!=action_id || ack.at("epoch")!=epoch || ack.at("action")!="ui")
+                        throw std::runtime_error("UI action acknowledgement mismatch");
+                    {std::lock_guard lock(mutex_);++stats_.ui_sent;}
+                }
+                next_ui=monotonic_ns()+25'000'000;
+            }
             if(gameplay_ && now>=next_input) {
                 std::optional<Input> in;
                 {std::lock_guard lock(mutex_);in=input_;}

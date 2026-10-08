@@ -949,3 +949,39 @@ launch, in-game test, rendering bridge, or complete port has been performed.
 - This packages the playable offline bridge, not a complete Minecraft port.
   World-depth fusion, host collision/player coupling, text, broader vanilla
   acceptance and unattributed D3D11 teardown warnings remain open.
+
+## UI events and vanilla feature acceptance (2026-10-09)
+
+- Added separate native 64-event FIFO, 250ms pre-send expiry, increasing action
+  IDs, current epoch and executed-action acknowledgement. Queue clears on focus
+  loss/toggle/reconnect, never retries a possibly executed event. New hello UI
+  capability rejects older clients before starting gameplay. Java text/key
+  admission rejects controls, oversize text, unknown keys, ambiguous text+key
+  and invalid modifiers. UI handlers execute only on the client tick thread.
+- Native T+h/e/l/l/o+Enter produced exact vanilla chat 'hello'; six UI events,
+  zero drops. CS2 command UI also set Survival mode and applied 3 damage. During
+  native redstone scripting, human desktop activity interrupted focus and the
+  driver refused further input. That run is not accepted as redstone gameplay;
+  the night-time survival lab suffered actual Skeleton/Zombie deaths.
+- An earlier command showed raw_copper_block text corruption: R fallback was
+  right-clicking chat suggestions. Restricted R to world view. E now passes
+  through vanilla handled-screen key logic to respect focused creative search.
+  Basic keys/layout text supported; no IME, clipboard or typematic claim.
+- Sprint now supplies vanilla sprintKey instead of forcing setSprinting(true),
+  keeping MC's own hunger/collision decisions. Added immutable player cursor/
+  offhand/sprint snapshots, bounded nearby entity readback and block properties.
+- Guest-only UI Tab+Enter respawned the actual player; command UI restored
+  Creative mode and health20. Read-only socket testing avoids desktop focus.
+- Added explicit --allow-lab-commands oracle. Actual redstone lamp readback lit
+  true then false, pig id1138 health10 ->9.792 after held attack, survival player
+  health18 after two damage. Fixture cleanup restored Creative, removed its
+  blocks/tagged pig and restored view; drops/health/save are not fully rolled back.
+  First combat fixture overlapped the lamp, causing suffocation and an obstructed
+  ray; removing the lamp before combat corrected the oracle, not game mechanics.
+- Latest builds: native15/15 including new FIFO/expiry/wrong-ack/old-guest socket
+  cases; Java28, zero failures; bridge Python41. Native CS2 sessions finished
+  Restored with no recovery failure. The leftover native test power block was
+  removed through the guest-only command interface. PCL saves remain untouched.
+- World-depth fusion, host player/collision integration, broad native control
+  acceptance, IME and D3D11 teardown attribution remain open. alpha.2 packages
+  the working offline bridge, not a complete all-feature cross-game port.

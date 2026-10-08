@@ -6,6 +6,7 @@
 #include <mutex>
 #include <thread>
 #include <optional>
+#include <deque>
 #include <json.hpp>
 
 namespace cc {
@@ -17,6 +18,7 @@ struct ReceiverStats {
     uint64_t cameras_sent{},camera_releases{};
     uint64_t cameras_rendered{};
     uint64_t inputs_sent{}, reconnects{};
+    uint64_t ui_sent{},ui_dropped{};
     std::array<double,3> player_eye{},player_rotation{};
     bool gui_open{};
     nlohmann::json player_status;
@@ -34,6 +36,9 @@ public:
     struct Input { double yaw{},pitch{},forward{},sideways{},mouse_x{.5},mouse_y{.5};
         int slot{}; bool jump{},sneak{},sprint{},attack{},use{},inventory{},escape{},drop{},swap{},pick{}; int64_t scroll{},captured_ns{}; };
     void submit_input(Input);
+    struct UiEvent { std::string text; int key{},modifiers{}; int64_t captured_ns{}; };
+    void submit_ui(UiEvent);
+    void clear_ui();
 private:
     void run();
     void session();
@@ -50,5 +55,6 @@ private:
     struct CameraUpdate { HostCamera camera; uint64_t sequence{}; int64_t captured_ns{}; };
     std::optional<CameraUpdate> camera_;
     std::optional<Input> input_;
+    std::deque<UiEvent> ui_;
 };
 }
