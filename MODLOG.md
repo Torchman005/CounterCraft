@@ -772,3 +772,28 @@ launch, in-game test, rendering bridge, or complete port has been performed.
 - Source-only publish check: 92 files, zero failures, one reviewed MODLOG absolute-path
   warning retained for reproducible local recovery. Existing loader and Java fixture
   results are prior-stage evidence, not newly rerun checks.
+
+## Cross-view scene evidence (2026-10-08)
+
+- Added dependency-free bridge.depth_evidence with bounded float32 min/max loading,
+  rigid-view inversion, pixel-centre reprojection, viewport-aware distance comparison,
+  explicit raw interval/MSAA spread filters and separate missing/occluding/disagreeing
+  counts. Empty overlap produces null metrics, never a verification success.
+- Independent synthetic ray/plane fixtures test moved and rotated cameras, deliberately
+  wrong view translation, absent geometry, mixed MSAA edges, malformed data and limits.
+- Private real data: capture 12->15 compares 24,978 samples, 99.964% within 1%, median
+  relative error 0.048994%; reverse compares 23,514, 99.902%, median 0.053083%.
+  Capture 12->18 compares 8,371 with median 0.035221%. Replacing derived origins with
+  console-foot+world-Z64 raises that median to 2.046331%; no corrective transform added.
+  Reverse 18->12 has 3,786 target-closer samples; occlusion/partial passes prevent an
+  all-pixels agreement claim. See ignored camera-depth-pair-evidence.json for full counts.
+- Visually inspected the private depth image: gun silhouette is present. At draws64/256,
+  raw<0.5 occupies zero pixels; at draw512 it occupies ~4.8% in the controlled samples.
+  Explicit raw [.5,.949999988079071) filtering helps this experiment only; it is not
+  a weapon classifier and would discard legitimate sufficiently near world geometry.
+- Same-frame world depth before the weapon pass is still needed. This stage adds scene
+  consistency evidence, not a live camera relay, final-pass selection or playable fusion.
+  No new CS2 launch, game file modification or user keyboard/mouse input was needed.
+- All 35 Python tests pass; native binaries are unchanged from the preceding 11-suite
+  build. Source-only publish check: 94 files, zero failures, one reviewed journal path
+  warning. Captured retail data and the exploratory NumPy script remain private.
