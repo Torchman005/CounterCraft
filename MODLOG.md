@@ -2,6 +2,74 @@
 
 Started: 2026-10-06
 
+## Bounded background host observer (2026-10-08)
+
+- Continued from pushed `973ecf7` with standing authorization for offline tests
+  and milestone commit/push. Re-read the installed universal-modder mod-any-game,
+  mashup-mods, game-automation and publish-mod workflows. No project/ancestor
+  AGENTS.md was found. CS2 is still build 25738536 and starts only through Steam
+  with the exact `-insecure`/lab/`+sv_lan 1 +map de_dust2` arguments. Original
+  PCL OptiFine instance/worlds, Steam configuration and graphics settings unchanged.
+- Replaced HostProbe's callback try_lock and whole-inventory report copy with a
+  16384-slot multi-producer/single-consumer value-metadata queue. Each callback
+  copies a 136-byte payload, makes at most eight atomic reservation attempts and
+  never allocates, waits for the consumer or holds GPU/COM ownership. Sequence
+  publication prevents reading partial payloads and the consumer never skips an
+  unpublished head. The background reporter drains bounded batches at a 2ms poll
+  interval and exclusively owns inventory/snapshot/JSON work. Queue-full,
+  producer-contention and callback failures count separately, with rejected event
+  kinds. Normal unregistration drains the tail and emits finalReport before unload.
+- Added five test groups: ring wrap/FIFO, lifecycle/handle reuse/effect replay,
+  full queue plus bounded drain/recovery, four simultaneous producers with exact
+  accepted/rejected accounting, and report snapshots overlapping production.
+  Eight CTest suites passed in 9.91s; 18 Python regressions in 0.715s; 26 isolated
+  loader/Steam fixtures in 127.858s. Clean final build has no MSVC warnings; key
+  header dependencies still verified. Initial test discovery pointed at a missing
+  bridge/tests directory; correct explicit module run subsequently passed.
+- Fresh universal-modder snapshot countercraft-cs2-depth-queue/20261008-095535.zip
+  (105 files/445.6 MB) before game writes. Candidate hash
+  a42733eb6ae42b61a58baf0ba122895f36682a33a43eeac494e0e994e22c1536;
+  install state f92c8be8b27b40d2b3bc6b5ff52c57ec. Steam PID 18224 launched exact
+  CS2 PID 43260 with fixed offline flags plus the permitted -perfectworld suffix.
+  universal-modder gfxcapture screenshots inspected loading and actual Dust2/bot
+  first-person mid scene. No automated focus, input or menu/setting change sent.
+- 165 reports, 139 with candidates. Three add-on lifetimes: two short initial
+  device probes each drain two events, then the actual render lifetime drains
+  21,227,415. Reset counters at each finalReport boundary when checking monotonicity;
+  they are lifetime-local, not process-global. All defined missed/full/contended/
+  callback-failure/deferred/inventory-overflow counters stay zero. Final
+  knownLossFree=true, pending=0, runtimes=0, devices empty. Every parsed per-view
+  draw/element/indirect/clear sum equals its candidate aggregate; queued equals
+  processed plus pending and accepted counters/intervals are monotonic per lifetime.
+- Peak pending sampled at drain start 9291/16384; maximum batch 9291 events,
+  maximum drain 2388us, total drain 1,236,339us over the main lifetime. Active
+  snapshot build P50/P95/max=37/59/162us. Active report JSON-tree build (including
+  snapshot, excluding dump/disk)=672/912/1230us. These measure background work,
+  not render callback cost, FPS or an A/B performance baseline. Zero known gaps
+  in this session does not prove unknown callback paths are fully covered.
+- D3D11 output 1680x1050; four-sample D24S8 resource/2DMS typed DSV and other
+  single-sample D24S8/D16 descriptions remain correctly normalized. Main candidate
+  draw range includes clear-only intervals (0..2423), nonBaseViewDraws=0. Still
+  read-only metadata: no host depth pixels, native resource ownership, camera
+  constants, GPU wait, selection or fusion. cameraDepthVerified/autoSelected=false.
+  MC not running: no receives/uploads, zero own-resource failures, expected socket
+  deadline. This is not a repeat MC preview test or world-depth proof.
+- CloseMainWindow sent only to exact verified offline PID 43260; graceful exit,
+  final report, runtime destruction, add-on unregister and Finished exiting logged.
+  D3D11 reference warning 1661 remains unexplained. Exact state restore removed
+  only hash-matched dxgi.dll/bootstrap; no CS2 processes remain. universal-modder
+  diff against the fresh ZIP has no added/removed/changed files. Existing crash
+  evidence and steam_appid.txt preserved; private logs/screenshots remain ignored.
+- Next: depth-candidate scene evidence/MSAA read route, actual host camera/
+  projection/viewport/convention, same-frame MC alignment and real cube occlusion;
+  then gameplay input/collision/building/mining/crafting and lifecycle/stability.
+  This closes the observer-loss subtask only; the working 5-8-stage estimate to
+  an offline playable prototype is retained until the camera/depth route is proven.
+- Source-only universal-modder publication check compared 78 files with the full
+  actual CS2 install: zero failures, one known absolute-user-path warning in this
+  journal. Recovery provenance is intentionally retained. No game binaries/assets,
+  raw logs/screenshots, dependencies, backups or crash evidence are staged.
+
 ## D3D11 DSV normalization and bounded view telemetry (2026-10-08)
 
 - User requested the next round and a remaining-round estimate; standing user

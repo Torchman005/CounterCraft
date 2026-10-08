@@ -1,8 +1,6 @@
 #pragma once
-#include "depth_inventory.hpp"
+#include "depth_observer.hpp"
 #include <json.hpp>
-#include <atomic>
-#include <mutex>
 
 namespace cc {
 class HostProbe {
@@ -12,20 +10,13 @@ public:
     void install();
     void uninstall();
     nlohmann::json report() const;
-    void deferred() { ++deferred_events_; }
-    template<class F> void observe(F&& operation) noexcept {
-        if (!enabled_) return;
-        try {
-            std::unique_lock lock(mutex_,std::try_to_lock);
-            if(!lock.owns_lock()) { ++missed_events_; return; }
-            operation(inventory_);
-        } catch (...) { ++missed_events_; }
-    }
-    void failed() { ++missed_events_; }
+    bool enabled() const { return enabled_; }
+    void drain() noexcept { if(enabled_) observer_.drain(); }
+    void deferred() noexcept { observer_.deferred(); }
+    void observe(const DepthEvent& event) noexcept { if(enabled_) observer_.submit(event); }
+    void failed() noexcept { observer_.failed(); }
 private:
     bool enabled_{}, installed_{};
-    mutable std::mutex mutex_;
-    DepthInventory inventory_;
-    std::atomic<uint64_t> missed_events_{}, deferred_events_{};
+    DepthObserver observer_;
 };
 }

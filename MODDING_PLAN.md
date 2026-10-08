@@ -41,7 +41,7 @@ follow a CS2 camera. Existing OptiFine worlds remain untouched.
   cleanup was later verified in the offline CS2 session; resize/world switch
   lifecycle remains open.
 - Native lab checkpoint: isolated D3D11 colour/depth composition and Windows
-  loopback receiver verified. Seven CTest suites currently pass, including nine
+  loopback receiver verified. Eight CTest suites currently pass, including nine
   native socket tests and actual DLL refusal in a non-CS2 process. Hardware MC test received/
   uploaded 180 frames in 10 seconds, age P95 112.33ms. This uses known eye-space
   cube geometry, not the CS2 camera/depth.
@@ -77,6 +77,18 @@ follow a CS2 camera. Existing OptiFine worlds remain untouched.
   aggregate/per-view accounting. 107 reports/103 with candidates, final coverage
   misses 159/0/0; complete coverage, performance and world-depth identity remain
   open. Temporary files restored and the game folder matches its fresh backup.
+- Background observer checkpoint: a fixed-capacity value-event queue replaces
+  callback try_lock/whole-inventory copy contention. Eight CTest suites (including
+  five concurrency/observer groups), 18 Python regressions and 26 workflow fixtures
+  pass. Steam offline Dust2 emitted 165 reports/139 with candidates across three
+  add-on lifetimes; main lifetime drained 21,227,415 events, defined missed/full/
+  contended/callback-failure/deferred/overflow counters all zero, knownLossFree=true.
+  Peak pending sampled at drain start was 9291/16384, max background drain 2388us,
+  active snapshot P50/P95/max 37/59/162us. Candidate/view totals and lifetime-local
+  counter monotonicity passed. Final runtime/devices/pending returned to zero;
+  restored game folder matched its new backup. This is continuity/background
+  measurement, not a complete callback-path or FPS baseline claim. Camera/depth
+  identity/MSAA access still open; unexplained teardown reference warning remains.
 
 ## Remaining acceptance stages
 
@@ -86,7 +98,8 @@ a guarantee of a complete all-feature Minecraft port. A stage can require more
 than one round when the real-game oracle exposes a new issue.
 
 1. Identify the relevant depth candidate with scene evidence, establish MSAA
-   handling and address observer event loss/overhead.
+   handling and measure render/total overhead. Observer's defined event gaps were
+   zero in the new offline session; unknown callback coverage still needs evidence.
 2. Confirm the host camera/projection/viewport and depth convention.
 3. Align the actual MC view and host pose/units/timing, then verify real occlusion
    with a known in-world cube.

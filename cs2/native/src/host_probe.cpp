@@ -38,33 +38,36 @@ bool depth_description(const api::resource_desc& desc,DepthDescription& output) 
 void init_resource(api::device* device,const api::resource_desc& desc,const api::subresource_data*,api::resource_usage,api::resource resource) {
     if(!probe || !d3d11(device)) return;
     DepthDescription description;
-    if(depth_description(desc,description)) probe->observe([&](auto& p){p.observe({key(device),resource.handle},description,true);});
+    if(depth_description(desc,description)) probe->observe({.kind=DepthEventKind::observe,.device=key(device),
+        .resource=resource.handle,.description=description,.new_lifetime=true});
 }
 void destroy_resource(api::device* device,api::resource resource) {
-    if(probe && d3d11(device)) probe->observe([&](auto& p){p.destroy_resource({key(device),resource.handle});});
+    if(probe && d3d11(device)) probe->observe({.kind=DepthEventKind::destroy_resource,.device=key(device),.resource=resource.handle});
 }
 void destroy_device(api::device* device) {
-    if(probe) probe->observe([&](auto& p){p.destroy_device(key(device));});
+    if(probe) probe->observe({.kind=DepthEventKind::destroy_device,.device=key(device)});
 }
 void reset_command(api::command_list* cmd) {
-    if(probe && cmd) probe->observe([&](auto& p){p.unbind(key(cmd->get_device()),key(cmd));});
+    if(probe && cmd) probe->observe({.kind=DepthEventKind::unbind,.device=key(cmd->get_device()),.command=key(cmd)});
 }
 void bind_depth(api::command_list* cmd,uint32_t,const api::resource_view*,api::resource_view dsv) {
     if(!immediate(cmd)) return;
     try {
         auto* device=cmd->get_device();
-        if(!dsv.handle) { probe->observe([&](auto& p){p.unbind(key(device),key(cmd));}); return; }
+        if(!dsv.handle) { probe->observe({.kind=DepthEventKind::unbind,.device=key(device),.command=key(cmd)}); return; }
         const auto resource=device->get_resource_from_view(dsv);
         DepthDescription description;
         if(!resource.handle || !depth_description(device->get_resource_desc(resource),description)) {
-            probe->observe([&](auto& p){p.unbind(key(device),key(cmd));}); return;
+            probe->observe({.kind=DepthEventKind::unbind,.device=key(device),.command=key(cmd)}); return;
         }
         const auto view=describe_depth_view(device->get_resource_view_desc(dsv),description);
-        probe->observe([&](auto& p){p.bind_view(key(device),key(cmd),resource.handle,description,view);});
+        probe->observe({.kind=DepthEventKind::bind,.device=key(device),.command=key(cmd),
+            .resource=resource.handle,.description=description,.view=view});
     } catch (...) { probe->failed(); }
 }
 bool draw(api::command_list* cmd,uint32_t count,uint32_t instances,uint32_t,uint32_t) {
-    if(immediate(cmd)) probe->observe([&](auto& p){p.draw(key(cmd->get_device()),key(cmd),count,instances);});
+    if(immediate(cmd)) probe->observe({.kind=DepthEventKind::draw,.device=key(cmd->get_device()),
+        .command=key(cmd),.elements=count,.instances=instances});
     return false; // Never suppress or replace a game command.
 }
 bool draw_indexed(api::command_list* cmd,uint32_t count,uint32_t instances,uint32_t,int32_t,uint32_t) {
@@ -72,7 +75,8 @@ bool draw_indexed(api::command_list* cmd,uint32_t count,uint32_t instances,uint3
 }
 bool indirect(api::command_list* cmd,api::indirect_command type,api::resource,uint64_t,uint32_t count,uint32_t) {
     if((type==api::indirect_command::draw || type==api::indirect_command::draw_indexed) && immediate(cmd))
-        probe->observe([&](auto& p){p.draw(key(cmd->get_device()),key(cmd),count,1,true);});
+        probe->observe({.kind=DepthEventKind::draw,.device=key(cmd->get_device()),
+            .command=key(cmd),.elements=count,.instances=1,.indirect=true});
     return false;
 }
 bool clear(api::command_list* cmd,api::resource_view dsv,const float* depth,const uint8_t*,uint32_t,const api::rect*) {
@@ -83,7 +87,8 @@ bool clear(api::command_list* cmd,api::resource_view dsv,const float* depth,cons
         DepthDescription description;
         if(resource.handle && depth_description(device->get_resource_desc(resource),description)) {
             const auto view=describe_depth_view(device->get_resource_view_desc(dsv),description);
-            probe->observe([&](auto& p){p.clear({key(device),resource.handle},description,*depth,&view);});
+            probe->observe({.kind=DepthEventKind::clear,.device=key(device),.resource=resource.handle,
+                .description=description,.view=view,.clear_value=*depth,.has_view=true});
         }
     } catch (...) { probe->failed(); }
     return false;
@@ -91,10 +96,10 @@ bool clear(api::command_list* cmd,api::resource_view dsv,const float* depth,cons
 void begin_effects(api::effect_runtime* runtime,api::command_list*,api::resource_view,api::resource_view) {
     if(!probe || !d3d11(runtime->get_device())) return;
     uint32_t w=0,h=0; runtime->get_screenshot_width_and_height(&w,&h);
-    probe->observe([&](auto& p){p.begin_effects(key(runtime->get_device()),w,h);});
+    probe->observe({.kind=DepthEventKind::begin_effects,.device=key(runtime->get_device()),.width=w,.height=h});
 }
 void end_effects(api::effect_runtime* runtime,api::command_list*,api::resource_view,api::resource_view) {
-    if(probe && d3d11(runtime->get_device())) probe->observe([&](auto& p){p.end_effects(key(runtime->get_device()));});
+    if(probe && d3d11(runtime->get_device())) probe->observe({.kind=DepthEventKind::end_effects,.device=key(runtime->get_device())});
 }
 void secondary(api::command_list* cmd,api::command_list*) {
     if(probe && cmd && d3d11(cmd->get_device())) {
@@ -161,11 +166,9 @@ void HostProbe::uninstall() {
 }
 nlohmann::json HostProbe::report() const {
     if(!enabled_) return {{"enabled",false}};
-    DepthInventory copy;
-    { std::lock_guard lock(mutex_); copy=inventory_; }
-    const auto missed=missed_events_.load(), deferred=deferred_events_.load();
+    const auto snapshot=observer_.snapshot();
     nlohmann::json devices=nlohmann::json::array();
-    for(const auto& report:copy.reports()) {
+    for(const auto& report:snapshot.devices) {
         if(!report.device_id) continue;
         nlohmann::json candidates=nlohmann::json::array();
         for(uint32_t i=0;i<report.count;++i) {
@@ -190,8 +193,20 @@ nlohmann::json HostProbe::report() const {
         devices.push_back({{"deviceId",report.device_id},{"interval",report.interval},{"outputSize",{report.width,report.height}},
             {"candidates",candidates}});
     }
+    nlohmann::json rejected=nlohmann::json::object();
+    constexpr std::array names={"observeResource","destroyResource","destroyDevice","bindDepth","unbindDepth",
+        "draw","clearDepth","beginEffects","endEffects"};
+    static_assert(names.size()==size_t(DepthEventKind::count));
+    for(size_t i=0;i<names.size();++i) rejected[names[i]]=snapshot.rejected_by_kind[i];
     return {{"enabled",true},{"readOnly",true},{"cameraDepthVerified",false},{"autoSelected",false},
-        {"missedEvents",missed},{"deferredEvents",deferred},{"overflow",copy.overflow()},
-        {"knownLossFree",missed==0 && deferred==0 && copy.overflow()==0},{"devices",devices}};
+        {"missedEvents",snapshot.missed()},{"deferredEvents",snapshot.deferred_events},{"overflow",snapshot.overflow},
+        {"knownLossFree",snapshot.known_loss_free()},{"devices",devices},
+        {"queueCapacity",DepthObserver::queue_capacity},{"eventBytes",sizeof(DepthEvent)},
+        {"eventsQueued",snapshot.queued},{"eventsProcessed",snapshot.processed},{"pendingEvents",snapshot.pending},
+        {"peakPendingAtDrain",snapshot.peak_pending_at_drain},{"queueFullEvents",snapshot.full_events},
+        {"queueContentionEvents",snapshot.contended_events},{"callbackFailures",snapshot.callback_failures},
+        {"rejectedEventsByKind",rejected},{"drainBatches",snapshot.drain_batches},
+        {"maxBatchEvents",snapshot.max_batch_events},{"totalDrainUs",snapshot.total_drain_us},
+        {"maxDrainUs",snapshot.max_drain_us},{"snapshotBuildUs",snapshot.snapshot_build_us}};
 }
 }

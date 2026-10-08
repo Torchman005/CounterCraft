@@ -29,7 +29,7 @@ localized Ninja cache previously linked old/new HostProbe layouts and crashed
 the first view-probe candidate before presentation; the clean candidate passed
 the real-game session below.
 
-CTest runs seven suites:
+CTest runs eight suites:
 
 - Binary protocol: seven groups for layout, bounds, UUID, sequence, CRC, JSON,
   epoch, camera vectors and finite depth.
@@ -53,6 +53,10 @@ CTest runs seven suites:
   unit scales 0.5/1/32 (48 cases). Checks full-image near/far occlusion, invalid
   host depth, host/guest sky and exact no-frame pass-through. These are synthetic
   textures, not CS2 captures.
+- Bounded depth observer: five groups for FIFO/ring wrap, lifecycle/effect replay,
+  full queue refusal/recovery, simultaneous producers with exact payload/accounting
+  checks, and report snapshots overlapping producer activity. All inventory work
+  runs on the consumer; callbacks only publish fixed value metadata.
 
 ## Real Minecraft oracle
 
@@ -244,7 +248,22 @@ offline process exited normally; runtime destruction/add-on unload were logged,
 the reference-count warning remains, and restored game files matched the latest
 backup including the retained first-attempt crash evidence.
 
-Still open: verified world-depth identity/MSAA access, full host-observer callback coverage/overhead, resize/world-switch/resource lifetime,
+The observer now uses a 16384-slot multi-producer/single-consumer sequence queue
+instead of callback try_lock/report-copy contention. Producers make at most eight
+atomic reservation attempts; rejection is explicit, never blocking. The reporter
+drains bounded batches every 2ms and emits one metadata report per second, plus
+a drained finalReport at unregister. Three actual add-on lifetimes (two short
+device probes and the render lifetime) emitted 165 reports/139 with candidates.
+The render lifetime processed 21,227,415 events with missed/full/contended/callback-
+failure/deferred/overflow all zero and knownLossFree=true. Peak backlog sampled
+at drain start was 9291; maximum drain batch time 2388us, active snapshot P95 59us.
+Every report's candidate/view counts matched. Final runtime/device/backlog counts
+were zero and the restored directory matched its fresh backup. Camera/depth
+selection remains false; this does not prove unknown callback coverage or FPS
+overhead, and the D3D11 reference-count warning still needs investigation.
+
+Still open: verified world-depth identity/MSAA access, unknown host callback paths
+and rendering overhead, resize/world-switch/resource lifetime,
 frame callback timing, the actual host
 camera/projection and depth resource/convention,
 then an in-world cube with correct occlusion. Gameplay input, collision, chunk and

@@ -64,23 +64,42 @@ struct AddonState {
     std::thread reporter;
 
     AddonState(bool p, bool probe) : host_probe(probe), preview(p) {}
+    void log_report(bool final) {
+        const auto status=receiver.stats();
+        const auto start=std::chrono::steady_clock::now();
+        auto report=nlohmann::json{{"countercraftProbe",true},{"preview",preview},{"finalReport",final},
+            {"api",api_id.load()},{"runtimes",runtime_count.load()},
+            {"size",{width.load(),height.load()}},{"uploads",uploads.load()},
+            {"resourceFailures",failures.load()},{"received",status.received},
+            {"connected",status.connected},{"failure",status.failure},
+            {"hostCameraDepthVerified",false},{"hostDepthProbe",host_probe.report()}};
+        // Includes snapshot and JSON tree construction, excludes dump/disk logging.
+        report["reportBuildUs"]=std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now()-start).count();
+        const auto message=report.dump();
+        reshade::log::message(reshade::log::level::info,message.c_str());
+    }
     void report_loop() {
         try {
             std::unique_lock lock(report_mutex);
-            std::string last;
-            while (!report_wake.wait_for(lock,std::chrono::seconds(1),[&]{ return ending; })) {
-                const auto status = receiver.stats();
-                const std::string message = nlohmann::json{{"countercraftProbe",true},{"preview",preview},
-                    {"api",api_id.load()},{"runtimes",runtime_count.load()},
-                    {"size",{width.load(),height.load()}},{"uploads",uploads.load()},
-                    {"resourceFailures",failures.load()},{"received",status.received},
-                    {"connected",status.connected},{"failure",status.failure},
-                    {"hostCameraDepthVerified",false},{"hostDepthProbe",host_probe.report()}}.dump();
-                if (message != last) {
-                    // Disk logging/JSON encoding happens here, never in a render callback.
-                    reshade::log::message(reshade::log::level::info,message.c_str()); last = message;
+            auto next_report=std::chrono::steady_clock::now()+std::chrono::seconds(1);
+            const auto poll=std::chrono::milliseconds(host_probe.enabled()?2:1000);
+            while (!report_wake.wait_for(lock,poll,[&]{ return ending; })) {
+                lock.unlock();
+                host_probe.drain();
+                if(std::chrono::steady_clock::now()>=next_report) {
+                    // All inventory work, snapshots, JSON and disk logging share
+                    // this consumer. Producers cannot contend with report work.
+                    log_report(false);
+                    next_report=std::chrono::steady_clock::now()+std::chrono::seconds(1);
                 }
+                lock.lock();
             }
+            lock.unlock();
+            // AddonUninit unregisters producers before stop(). Drain the bounded
+            // tail and log teardown state instead of losing the last interval.
+            host_probe.drain();
+            log_report(true);
         } catch (...) { /* Never propagate an exception into the game. */ }
     }
     void stop() {
