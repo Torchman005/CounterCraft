@@ -1,4 +1,5 @@
 #include "host_probe.hpp"
+#include "depth_view.hpp"
 #include <reshade.hpp>
 #include <d3d11.h>
 
@@ -58,10 +59,8 @@ void bind_depth(api::command_list* cmd,uint32_t,const api::resource_view*,api::r
         if(!resource.handle || !depth_description(device->get_resource_desc(resource),description)) {
             probe->observe([&](auto& p){p.unbind(key(device),key(cmd));}); return;
         }
-        const auto view=device->get_resource_view_desc(dsv);
-        const bool base=view.type==api::resource_view_type::texture_2d && view.texture.first_level==0
-            && view.texture.levels==1 && view.texture.first_layer==0 && view.texture.layers==1;
-        probe->observe([&](auto& p){p.bind(key(device),key(cmd),resource.handle,description,base);});
+        const auto view=describe_depth_view(device->get_resource_view_desc(dsv),description);
+        probe->observe([&](auto& p){p.bind_view(key(device),key(cmd),resource.handle,description,view);});
     } catch (...) { probe->failed(); }
 }
 bool draw(api::command_list* cmd,uint32_t count,uint32_t instances,uint32_t,uint32_t) {
@@ -82,8 +81,10 @@ bool clear(api::command_list* cmd,api::resource_view dsv,const float* depth,cons
         auto* device=cmd->get_device();
         const auto resource=device->get_resource_from_view(dsv);
         DepthDescription description;
-        if(resource.handle && depth_description(device->get_resource_desc(resource),description))
-            probe->observe([&](auto& p){p.clear({key(device),resource.handle},description,*depth);});
+        if(resource.handle && depth_description(device->get_resource_desc(resource),description)) {
+            const auto view=describe_depth_view(device->get_resource_view_desc(dsv),description);
+            probe->observe([&](auto& p){p.clear({key(device),resource.handle},description,*depth,&view);});
+        }
     } catch (...) { probe->failed(); }
     return false;
 }
@@ -109,6 +110,18 @@ const char* kind_name(DepthKind kind) {
     case DepthKind::d32s8:return "d32s8";
     default:return "unknown";
     }
+}
+const char* view_type_name(DepthViewType type) {
+    switch(type) {
+    case DepthViewType::texture_2d:return "texture_2d";
+    case DepthViewType::texture_2d_array:return "texture_2d_array";
+    case DepthViewType::texture_2d_multisample:return "texture_2d_multisample";
+    case DepthViewType::texture_2d_multisample_array:return "texture_2d_multisample_array";
+    default:return "unsupported";
+    }
+}
+nlohmann::json subresources(const DepthSubresources& range) {
+    return {{"firstLevel",range.first_level},{"levels",range.levels},{"firstLayer",range.first_layer},{"layers",range.layers}};
 }
 }
 HostProbe::~HostProbe() { uninstall(); }
@@ -157,12 +170,22 @@ nlohmann::json HostProbe::report() const {
         nlohmann::json candidates=nlohmann::json::array();
         for(uint32_t i=0;i<report.count;++i) {
             const auto& c=report.candidates[i]; const auto& d=c.description; const auto& stats=c.counts;
+            nlohmann::json views=nlohmann::json::array();
+            for(uint32_t j=0;j<stats.view_count;++j) {
+                const auto& v=stats.views[j]; const auto& view=v.description;
+                views.push_back({{"type",view_type_name(view.type)},{"typeValue",uint32_t(view.type)},{"format",view.format},
+                    {"raw",subresources(view.raw)},{"normalized",subresources(view.normalized)},
+                    {"formatCompatible",view.format_compatible},{"canonicalBaseDsv",view.canonical},
+                    {"binds",v.binds},{"draws",v.draws},{"directElements",v.elements},{"indirectDraws",v.indirect},{"clears",v.clears},
+                    {"lastClear",v.has_clear ? nlohmann::json(v.last_clear) : nlohmann::json(nullptr)}});
+            }
             candidates.push_back({{"id",c.id},{"size",{d.width,d.height}},{"kind",kind_name(d.kind)},
                 {"format",d.format},{"samples",d.samples},{"layers",d.layers},{"levels",d.levels},
                 {"shaderReadable",d.shader_readable},{"samplingShapeOnly",d.sampling_shape()},
                 {"matchesOutput",c.matches_output},{"draws",stats.draws},{"directElements",stats.elements},
                 {"indirectDraws",stats.indirect},{"nonBaseViewDraws",stats.non_base_view_draws},{"clears",stats.clears},
-                {"lastClear",stats.has_clear ? nlohmann::json(stats.last_clear) : nlohmann::json(nullptr)}});
+                {"lastClear",stats.has_clear ? nlohmann::json(stats.last_clear) : nlohmann::json(nullptr)},
+                {"views",views}});
         }
         devices.push_back({{"deviceId",report.device_id},{"interval",report.interval},{"outputSize",{report.width,report.height}},
             {"candidates",candidates}});

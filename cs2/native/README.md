@@ -21,6 +21,14 @@ Headers are pinned to nlohmann/json 3.12.0 and ReShade v6.8.0 commit
 `18deaa52de0c425a78b329e9cb3c497281cd00ec`, with SHA256 checks. The scripts do not
 download/install a runtime loader or write game files. Outputs stay under `.local`.
 
+The build script sets process-local VSLANG=1033 and UTF-8 output for reliable
+MSVC `/showIncludes` parsing. Old localized dependency metadata triggers a fresh
+configure and clean rebuild. It also verifies nonzero header dependencies for
+inventory/add-on objects; `-Clean` requests a full rebuild explicitly. A stale
+localized Ninja cache previously linked old/new HostProbe layouts and crashed
+the first view-probe candidate before presentation; the clean candidate passed
+the real-game session below.
+
 CTest runs seven suites:
 
 - Binary protocol: seven groups for layout, bounds, UUID, sequence, CRC, JSON,
@@ -36,9 +44,11 @@ CTest runs seven suites:
   partial-read cancellation and mailbox expiry.
 - Projection math: six groups covering hand-derived finite/infinite endpoints,
   normal/reversed depth, left/right eye space, jitter, FP32 and invalid inputs.
-- Bounded depth inventory: nine groups for resource lifetime/reuse, effect
+- Bounded depth inventory: 16 groups for resource lifetime/reuse, effect
   exclusion, resize, multiple devices, indirect/subresource counts, capacity and
-  counter saturation. This replays synthetic events without any game.
+  counter saturation, single-sample/MSAA/array DSV normalization, API default
+  ranges, typed/typeless families, nonzero mip/layer rejection and bounded
+  per-view draw/clear accounting. This replays synthetic events without any game.
 - Projection GPU: hardware D3D11, eight projection modes at two resolutions and
   unit scales 0.5/1/32 (48 cases). Checks full-image near/far occlusion, invalid
   host depth, host/guest sky and exact no-frame pass-through. These are synthetic
@@ -157,6 +167,8 @@ Direct startup after this reinstall produced Launcher Error #720 even with
 parent PID and fixed arguments; unexpected user launch options cause refusal.
 `ProcessIdentityVerified` only confirms startup identity, not map or rendering
 success. No Steam settings, authentication, app ID or ownership files are changed.
+The exact Steam-appended `-perfectworld` region suffix is also accepted after
+the fixed offline arguments; other unexpected options and `+connect` are refused.
 
 With `-SteamLaunch`, only `game/bin/win64/dxgi.dll` and a small `ReShade.ini`
 bootstrap are installed. The official ReShade 6.8.0 `[INSTALL] BasePath` redirects
@@ -181,6 +193,10 @@ Process operations in launch fixtures are replaced; tests never launch a game:
 ```powershell
 python scripts/test-cs2-loader.py --loader .local/reshade-runtime/ReShade64.dll -v
 ```
+
+Install/restore fixtures also replace process queries, so a running user game
+cannot contaminate the isolated file tests. A busy-process fixture verifies the
+unchanged production refusal without touching the real game.
 
 ## Host depth preparation without a game install
 
@@ -207,10 +223,28 @@ candidate was four-sample MSAA; single-sample screen-size D24S8 and other-size D
 D24S8 candidates were also present. Final missed/deferred/overflow counts were
 20/0/0, so `knownLossFree=false`. Camera/depth selection remained disabled. MC was
 not running; the receiver timeout was expected and independent of host metadata.
-The [host depth note](../../docs/host-depth-probe.md) records the view-description
+The [host depth note](../../docs/host-depth-probe.md) records the old view-description
 classification limitation and why these observations cannot identify world depth.
 
-Still open: view normalization, full host-observer callback coverage/overhead, resize/world-switch/resource lifetime,
+The new observer normalizes D3D11 2D/2DMS/array DSV descriptions, including ignored
+fields and UINT32_MAX ranges. Each candidate reports up to four raw/normalized
+view descriptions per interval with independent bind/draw/clear counts; extra
+descriptions increment overflow while aggregate draws continue. A canonical base
+DSV covers mip 0 and all layers with a compatible typed depth format and sampling
+shape. It is metadata evidence only; MSAA remains unsuitable for the existing
+single-sample compositor. The new view telemetry passes synthetic checks, and its
+actual offline CS2 descriptions were also verified after a clean rebuild: 107
+reports (103 with candidates), 1680x1050 output, typed 2DMS D24S8 on a typeless
+four-sample resource, and ignored layers=0 correctly normalized to one. Direct/
+indirect/clear per-view counts matched aggregate counts and nonBaseViewDraws=0.
+Single-sample D24S8 and D16 views also matched; array/subresource/default-range
+cases remain synthetic. Final missed/deferred/overflow=159/0/0, so no complete
+coverage or performance claim. Camera/depth identity stays unverified. The exact
+offline process exited normally; runtime destruction/add-on unload were logged,
+the reference-count warning remains, and restored game files matched the latest
+backup including the retained first-attempt crash evidence.
+
+Still open: verified world-depth identity/MSAA access, full host-observer callback coverage/overhead, resize/world-switch/resource lifetime,
 frame callback timing, the actual host
 camera/projection and depth resource/convention,
 then an in-world cube with correct occlusion. Gameplay input, collision, chunk and

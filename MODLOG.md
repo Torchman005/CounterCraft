@@ -2,6 +2,105 @@
 
 Started: 2026-10-06
 
+## D3D11 DSV normalization and bounded view telemetry (2026-10-08)
+
+- User requested the next round and a remaining-round estimate; standing user
+  authorization includes offline tests and stage commit/push. Starting from
+  pushed 84f6ecf. No project/ancestor AGENTS.md was found. Continued the installed
+  universal-modder workflow; the plugin's own sources remain outside this repo.
+- Read pinned ReShade API resource definitions and v6.8.0 public
+  d3d11_impl_type_convert.cpp. DSV conversion sets one mip; 2DMS has no mip
+  selector, non-array DSV has no slice selector. Unused layer fields are zero,
+  while API UINT32_MAX denotes remaining active levels/layers. The old exact
+  texture_2d/1-layer check misclassified both MSAA and ignored layer fields.
+- Added independent core normalization plus a ReShade description adapter.
+  Requires typed DSV/resource depth-family compatibility, the corresponding
+  single/MS sampling shape, mip 0 and all resource layers for canonicalBaseDsv.
+  Active zero counts, unknown resource ranges, nonzero/partial subresources,
+  multi-mip ranges, wrong format and unsupported types stay noncanonical.
+  Canonical MSAA is still not single-sample compositing support.
+- Per candidate/completed interval, four fixed slots store distinct raw and
+  normalized descriptions with bind/draw/indirect/clear counts. Overflow keeps
+  aggregate accounting and reports a known coverage gap. Effect boundaries,
+  resource reuse, descriptor changes and device destruction reset metadata.
+  No new native resource ownership, GPU copy/wait, camera scan or pixel reads.
+- First build: seven CTest suites passed in 8.81s. Depth inventory now has 16
+  groups covering shape/default/format/subresource behavior and bounded view
+  accounting. Test inventories moved to heap to avoid accumulating fixed arrays
+  in the test executable's Windows stack. Eighteen Python tests passed in 0.710s.
+- Initially prepared only .local/cs2-view-probe-candidate for the current Steam install;
+  GameFilesWritten=false and both loader targets remain absent. On checking the
+  live process, user's PID 8884 has -steam -perfectworld (no offline/lab flags).
+  Computer Use observed an active Dust2 deathmatch. No app input was sent,
+  no process was closed and no loader was installed into that session. Asked
+  when to perform the required offline relaunch. The process subsequently exited
+  on its own; only then continued the already-authorized offline validation.
+- The first 22-workflow-check run failed 17 fixtures because their installer
+  queries still saw the real CS2 process. Production correctly refused; no real
+  game changes. Isolated install/restore and preview process queries in the test
+  harness and added a mocked-busy refusal. The wrapper first used an array splat,
+  which passed -Mode positionally; switched to named hashtable splatting. Focused
+  install/conflict/restore and busy-refusal checks then passed (2 tests, 9.417s).
+  The isolated full rerun passed all 23 checks in 106.168s. Production process
+  guards unchanged; launch suffix support was added subsequently below. All ten
+  tracked PowerShell scripts parsed; Python fixture syntax/whitespace passed.
+- Fresh backup countercraft-cs2-view-probe/20261008-091414.zip (104 files,
+  444.3 MB), install state 3d1ba1c284f847c8a6058e97d8850846. Steam PID 18224
+  started PID 30356 with all lab flags plus a trailing -perfectworld. Launcher
+  correctly rejected the unexpected suffix; the process then crashed before
+  presentation. Local minidump parser found 0xc0000005 in CounterCraftProbe at
+  offset 0x3e2cb. No native scanner/debugger was attached. Restored both temporary
+  files; kept cs2_2026_1008_091549_0_accessviolation.mdmp as private evidence.
+- Found old addon.cpp object timestamp 01:27 with Ninja #deps 0. CMake cached
+  a mojibake Chinese /showIncludes prefix while compiler output was valid
+  Chinese; host_probe.cpp/core rebuilt after header layout changes, but the
+  allocating/report-caller addon.cpp object did not. This stale-layout mixture
+  accounts for the add-on fault; a clean rebuild fixed startup. Build script
+  now sets process-local VSLANG=1033/UTF-8, resets non-English cached metadata
+  with --fresh and --clean-first, and requires nonzero header dependencies for
+  all three key objects. Explicit -Clean is available. Clean build compiled all
+  25 steps; CTest passed again in 8.82s. Actual dependencies: addon 279, host
+  probe 318, inventory 89. Header timestamp dry-run schedules all three objects.
+- Added only exact optional -perfectworld suffix acceptance to both Steam
+  launchers; offline/lab arguments and rejection of arbitrary extra options
+  remain. No Steam region/settings/authentication changes. New region +connect
+  refusal and lab/vanilla suffix mocks passed with all 26 fixtures in 118.263s.
+- Clean candidate hash 13ab480023a662a43b6d9b6e907a0c0f12c63eb91f1172186edf46cebf9f92be.
+  Fresh backup countercraft-cs2-view-probe-clean/20261008-092324.zip (105 files,
+  445.6 MB) includes the retained crash. Installation state
+  51e1351dd4fb459d87349d74dd857ec8. Steam launched exact PID 47100 with required
+  flags plus region suffix; verified receipt and Computer Use observed actual
+  local Dust2/bot first-person T spawn. No UI input/graphics changes were sent.
+- 107 reports, 103 with candidates; D3D11 output 1680x1050. Main 4x D24S8
+  resource format 44 / typed view 45 is texture_2d_multisample, raw
+  firstLevel/levels/firstLayer/layers=0/1/0/0 -> normalized 0/1/0/1,
+  canonicalBaseDsv=true, nonBaseViewDraws=0, positive draw range 10..2111.
+  Single-sample screen-size D24S8 and 4352x5248 D16 plus smaller D24S8 also
+  normalize correctly. Every parsed per-view draw/element/indirect/clear sum
+  matches candidate totals. Arrays/nonzero subresources/default whole ranges
+  are synthetic-only cases. Camera identity and selection remain false.
+- Final missed/deferred/overflow=159/0/0; knownLossFree=false. No performance
+  baseline or attribution of lost events; cannot compare directly to previous
+  session's 20. MC not running: zero received/uploads, no resource failures,
+  socket timeout expected. This validates metadata, not MC preview or fusion.
+- Gracefully closed exact PID 47100. ReShade logged runtime destruction,
+  add-on unregister and Finished exiting; last timed report still had runtime=1
+  before destruction (no separate zero-count sample). D3D11 reference warning
+  1353 remains un-attributed. Restored both files by the exact state; no CS2,
+  dxgi.dll or game ReShade.ini remains. universal-modder diff against the clean
+  backup: no added/removed/changed files. Crash/private logs remain ignored.
+- Final staged-source universal-modder publish check: 74 files, zero failures,
+  one known absolute-user-path warning in this journal. The exact recovery paths
+  are intentional provenance; no game binaries, imagery, minidumps, raw logs or
+  dependency files are staged. Original first backup comparison has only the
+  newly created first-attempt crash dump, with no removed/changed files.
+- Next: actual Steam -insecure Dust2 report/restore oracle, then verified host
+  camera/projection/viewport, same-frame MC alignment, real occlusion, gameplay
+  input/collision/interaction, resource lifecycle and performance regression.
+  Working estimate is 5-8 further stage acceptances to an offline playable
+  prototype, conditional on camera/depth integration; a complete all-feature
+  Minecraft port has no defensible fixed-round guarantee yet.
+
 ## Steam launch and actual host-depth observation after reinstall (2026-10-08)
 
 - User confirmed CS2 download finished and requested continuation of the approved

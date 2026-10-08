@@ -1,6 +1,6 @@
 # CounterCraft offline modding plan
 
-- Install: `D:\steam\steamapps\common\Counter-Strike Global Offensive` (Steam app 730, build 25738536)
+- Install: `D:\steam1\steamapps\common\Counter-Strike Global Offensive` (Steam app 730, build 25738536; reinstalled 2026-10-08)
 - Engine: Source 2; client files contain `game/core/gameinfo.gi` and `game/csgo/gameinfo.gi`
 - Minecraft: `D:\pcl2\Release 2.8.3`, requested instance `1.20.1-OptiFine_I6`
 - Route: an offline passthrough bridge. Minecraft remains the simulation and CS2 is the host view.
@@ -58,15 +58,45 @@ follow a CS2 camera. Existing OptiFine worlds remain untouched.
   exit the loader was removed and the directory matched its pre-install backup.
   A teardown reference
   warning also appeared with only ReShade loaded; attribution/lifetime remains open.
-- 2026-10-08 host-depth preparation checkpoint: fixed-capacity, opt-in ReShade
+- 2026-10-08 host-depth checkpoint: fixed-capacity, opt-in ReShade
   metadata observation, with no depth/camera readback or resource selection. Pure
   event replay covers lifetime/reuse, effect exclusion and bounded accounting.
   Explicit D3D perspective depth inversion supports normal/reversed Z, left/right
   eye space and finite/infinite far. Hardware GPU oracle passes 48 projection/
-  resolution/unit combinations. The new callbacks remain unverified in CS2.
-- User is reinstalling CS2 after accidental deletion. Only independent lab tests
-  and repository-local candidate preparation ran; no game-folder writes/launches.
-  After download completes, recheck build/location and make a fresh backup.
+  resolution/unit combinations. After reinstall, a Steam-launched offline Dust2
+  session produced 143 reports (137 with candidates); missed/deferred/overflow
+  ended at 20/0/0, so no complete event coverage or world-depth identity claim.
+  The temporary loader and INI bootstrap were restored, matching the new backup.
+  Direct cs2.exe launch caused Launcher Error #720; current scripts use Steam.
+- Next view-description checkpoint: single/MSAA/array DSVs, ignored D3D11
+  fields, API default ranges and typed/typeless formats are normalized. Four
+  per-view metadata slots per candidate/interval retain independent draw/clear
+  counts. Seven CTest suites pass, including 16 depth-inventory groups. After
+  fixing a localized Ninja dependency-cache bug and rebuilding every object,
+  Steam-launched offline Dust2 verified 2DMS/single-sample descriptions and
+  aggregate/per-view accounting. 107 reports/103 with candidates, final coverage
+  misses 159/0/0; complete coverage, performance and world-depth identity remain
+  open. Temporary files restored and the game folder matches its fresh backup.
+
+## Remaining acceptance stages
+
+The working estimate is 5-8 further stage acceptances to an **offline playable
+prototype**, conditional on the host-camera and depth route working. It is not
+a guarantee of a complete all-feature Minecraft port. A stage can require more
+than one round when the real-game oracle exposes a new issue.
+
+1. Identify the relevant depth candidate with scene evidence, establish MSAA
+   handling and address observer event loss/overhead.
+2. Confirm the host camera/projection/viewport and depth convention.
+3. Align the actual MC view and host pose/units/timing, then verify real occlusion
+   with a known in-world cube.
+4. Route gameplay input, player state/collision and MC interactions; test building,
+   mining and at least one inventory/crafting interaction end to end.
+5. Verify resize/world changes/resource release, regress performance/stability,
+   and package a repeatable launch/restore flow.
+
+Camera identity, MSAA depth access, latency and cross-game player/collision
+semantics are still open; those findings can change both scope and round count.
 
 ## Next client slice
 

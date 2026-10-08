@@ -57,7 +57,9 @@ try {
     $observed = $started[0]
     $receipt.ProcessId = $observed.ProcessId
     $expectedSuffix = [regex]::Escape(($launchArguments -join ' '))
-    $expectedLine = '^"?' + [regex]::Escape($cs2) + '"?\s+(?:-steam\s+)?' + $expectedSuffix + '\s*$'
+    # Steam's China launch route appends its region selector after app arguments.
+    # Admit that exact suffix only; do not accept arbitrary user launch options.
+    $expectedLine = '^"?' + [regex]::Escape($cs2) + '"?\s+(?:-steam\s+)?' + $expectedSuffix + '(?:\s+-perfectworld)?\s*$'
     if ($observed.CommandLine -notmatch $expectedLine) {
         throw 'Steam child arguments differ from the fixed offline lab arguments; inspect Steam launch options. Do not use this session.'
     }

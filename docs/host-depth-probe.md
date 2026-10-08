@@ -18,9 +18,9 @@ D24S8（候选 1），其有绘制的区间记录 13～1297 条直接/间接绘�
 确定世界深度、普通 Z 或 reversed-Z。
 
 结束时 `missedEvents=20`、`deferredEvents=0`、`overflow=0`，因此
-`knownLossFree=false`。未观察到延迟事件不等于完整覆盖。当前基础视图判断
-没有规范化 D3D11 的默认层数/mip 数和多采样视图，`nonBaseViewDraws` 不能
-据此证明游戏使用了非基础子资源；需要下一阶段核对实际视图描述。
+`knownLossFree=false`。未观察到延迟事件不等于完整覆盖。该次旧版本的基础
+视图判断没有规范化 D3D11 的默认层数/mip 数和多采样视图，
+`nonBaseViewDraws` 不能据此证明游戏使用了非基础子资源。
 `cameraDepthVerified=false`、`autoSelected=false` 始终保留。
 
 本次没有启动 MC，接收端的 `Socket deadline exceeded` 与宿主观察器独立。
@@ -30,6 +30,73 @@ D24S8（候选 1），其有绘制的区间记录 13～1297 条直接/间接绘�
 测试正常退出，runtime 归零并注销 add-on。D3D11 引用计数提示再次出现，
 原因仍未定位。临时加载器和 BasePath 配置均恢复，游戏目录与新备份完全
 一致，原有 `steam_appid.txt` 和崩溃记录保留。
+
+## 深度视图归一化（2026-10-08）
+
+已核对 ReShade v6.8.0 的公开 D3D11 视图转换代码：DSV 只选择一个 mip，
+多采样视图类型是 `texture_2d_multisample` / `texture_2d_multisample_array`。
+非数组 DSV 的 `first_layer/layers` 没有原生对应字段，转换后可为 0；
+多采样 DSV 没有 mip 选择字段。不能将这些忽略字段当成有效的零层范围。
+API 中 `UINT32_MAX` 的活动范围按资源剩余 mip/层数解释；活动 mip/数组
+范围为 0 不视为默认值。未知资源层数/mip 数、错误采样形状、不支持的视图
+类型、错误格式、非零 mip/数组起始层、部分数组和多 mip 范围均不分类为
+规范基础 DSV。非数组和多采样的忽略字段则按原生视图语义归一化。
+
+新增每候选 `views`，一个完成区间最多保留 4 种不同描述。每种记录
+`type/typeValue`、typed DSV `format`、原始和归一化的
+`firstLevel/levels/firstLayer/layers`、`formatCompatible`、
+`canonicalBaseDsv`、绑定/直接及间接绘制/清屏统计和最后清屏值。
+格式须匹配资源的 typed/typeless 深度族；SRV 解释或未知格式不作为 DSV。
+规范基础 DSV 定义为相符采样形状、mip 0 的单 mip、从层 0 覆盖资源所有层。
+超过 4 种描述增加 `overflow`；总绘制统计仍计数，不虚构丢弃描述的细分统计。
+这些槽在效果边界重置，并随资源生命周期/设备销毁失效。
+
+`nonBaseViewDraws` 现在统计未满足上述完整条件的绘制，因此也包括未知或
+不兼容描述，仍不能单独解释为“使用了非零子资源”。`canonicalBaseDsv=true`
+也只是元数据分类，不证明是相机世界深度，不选择资源或读取 GPU 像素。
+多采样 DSV 可以是规范基础视图，但 `samplingShapeOnly` 仍为 false；现有
+独立单采样合成器未新增 MSAA 深度读取/归约能力。
+
+7 组原生 CTest 通过；深度 inventory 从 9 扩展至 16 类合成检查，覆盖真实
+D3D11 转换形状、默认范围、mip/切片、格式族及有界细分统计。这些测试不
+依赖游戏。先在 `.local` 准备候选；检测到用户 CS2 在
+`-steam -perfectworld` 对局中时未安装或发送输入。该会话自行退出后才
+备份并进入已授权的离线测试。
+
+第一候选暴露构建问题：本机 CMake 误解码中文 MSVC `/showIncludes`
+前缀，Ninja 的 `addon.cpp` 头文件依赖计数为 0。修改 `HostProbe` 布局后，
+该对象仍是旧版而 `host_probe.cpp` 已重编，造成 add-on 启动时访问异常。
+已恢复临时文件，保留崩溃证据。构建脚本现在在本次进程中使用英语编译器
+输出和 UTF-8 代码页；检测旧的本地化前缀时重新配置并干净重编，还核验
+inventory 和两个 add-on 对象的头文件依赖。头文件时间戳变更的 dry-run
+确实安排重编全部三个依赖对象。干净构建后 7 组 CTest 再次通过。
+
+Steam 实际附加了 `-perfectworld` 地区后缀。启动脚本仅允许这一明确后缀，
+仍须匹配完整 `-insecure` 实验参数；`+connect` 或其他多余参数仍拒绝。
+未修改 Steam 地区/启动设置。新候选由 Steam PID 18224 创建 CS2 PID
+47100，确认本机 Dust2 与机器人场景。输出尺寸为 1680×1050，D3D11、
+RTX 4060 Laptop；未通过脚本修改图形设置。
+
+干净候选产生 107 份报告，103 份含候选。主 4× D24S8 的 DSV 类型为
+`texture_2d_multisample`，视图格式 45 匹配资源 typeless 格式 44；原始
+范围 `{firstLevel:0, levels:1, firstLayer:0, layers:0}` 归一化为
+`{firstLevel:0, levels:1, firstLayer:0, layers:1}`。
+有绘制区间记录 10～2111 条直接/间接命令，`nonBaseViewDraws=0`。
+屏幕尺寸单采样 D24S8、4352×5248 D16 及较小 D24S8 也表现为规范基础
+DSV。所有已报告视图的细分绘制/清屏计数之和与候选总数相符。
+数组、非零子资源和默认全范围目前只经过合成验证，本次游戏未观察到。
+
+最后 `missedEvents/deferredEvents/overflow=159/0/0`，因此
+`knownLossFree=false`。没有进行性能对照，不能将它与上一会话的 20 次
+直接比较，也未判定争用发生在哪类事件。世界深度和相机身份仍未验证，
+`autoSelected/cameraDepthVerified=false`。MC 未运行，接收超时及零上传为
+预期；本轮不是 MC 预览或世界融合复验。
+
+确切离线 PID 47100 正常关闭，ReShade 记录 runtime 销毁、add-on 注销并
+结束退出。最后一份定时报告在销毁前，runtime 数为 1；未单独采到归零
+报告。退出引用计数提示仍在（1353），原因待查。加载器和 bootstrap 已
+恢复，游戏目录与本轮干净候选的新备份无新增/删除/修改；首次失败创建的
+崩溃文件保留在此备份中，未发布。
 
 ## CS2 未安装时的准备
 
@@ -63,7 +130,8 @@ Get-Content .local/cs2-host-probe-candidate/install-plan.json
 生命周期编号，不输出原生指针，也不持有 COM 引用。
 
 固定容量为 128 个资源、64 个上下文绑定和 8 个设备，每设备最多报告
-8 个候选。销毁、重新创建或描述变化会使旧绑定失效并产生新编号。
+8 个候选，每候选每区间至多保留 4 种视图描述。销毁、重新创建或描述变化
+会使旧绑定失效并产生新编号。
 ReShade 效果阶段的绘制/清屏不计入宿主统计；效果结束后要求新的宿主绑定，
 避免把内部状态恢复误认为游戏绑定。
 

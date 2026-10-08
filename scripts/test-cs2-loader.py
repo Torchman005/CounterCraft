@@ -13,6 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 LOADER = None
 PWSH = None
 
+def ps_quote(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
 
 class LoaderTests(unittest.TestCase):
     def setUp(self):
@@ -36,12 +39,23 @@ class LoaderTests(unittest.TestCase):
         with zipfile.ZipFile(self.backup, 'w') as archive:
             archive.writestr('_um_manifest.json', json.dumps({'source': str(source), 'files': {}}))
 
-    def command(self, mode, *extra, error=None):
-        result = subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File',
-            str(ROOT / 'scripts/manage-cs2-loader.ps1'), '-Mode', mode,
-            '-Cs2Root', str(self.game_root), '-Candidate', str(self.candidate),
-            '-Loader', str(LOADER), '-BackupSnapshot', str(self.backup),
-            '-StateFile', str(self.state), *extra], capture_output=True, text=True,
+    def command(self, mode, *extra, error=None, busy=False):
+        # Fixture file operations must not depend on the user's running games.
+        # Keep the production process guard enabled and test it with a busy mock.
+        arguments = {'Mode': mode, 'Cs2Root': self.game_root, 'Candidate': self.candidate,
+            'Loader': LOADER, 'BackupSnapshot': self.backup, 'StateFile': self.state}
+        self.assertTrue(all(option == '-SteamLaunch' for option in extra))
+        argument_text = ';'.join(ps_quote(k) + '=' + ps_quote(v) for k, v in arguments.items())
+        if '-SteamLaunch' in extra:
+            argument_text += ';SteamLaunch=$true'
+        script = self.root / 'manage-fixture.ps1'
+        script.write_text("$ErrorActionPreference='Stop'\nfunction Get-Process {\n"
+            "    param($Name,$Id,$ErrorAction)\n"
+            "    if($Name -eq 'cs2' -and " + ('$true' if busy else '$false') + ") {\n"
+            "        [pscustomobject]@{Id=123;ProcessName='cs2'}\n    }\n}\n"
+            "$fixtureArguments=@{" + argument_text + "}\n& "
+            + ps_quote(ROOT / 'scripts/manage-cs2-loader.ps1') + " @fixtureArguments\n", encoding='utf8')
+        result = subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File', str(script)], capture_output=True, text=True,
             encoding='utf8', errors='replace', timeout=15)
         if error:
             self.assertNotEqual(result.returncode, 0)
@@ -52,6 +66,12 @@ class LoaderTests(unittest.TestCase):
     def test_preview_has_no_game_writes(self):
         self.command('Preview')
         self.assertFalse(self.target.exists()); self.assertFalse(self.state.exists())
+
+    def test_running_cs2_refuses_install_without_game_writes(self):
+        self.command('Install', '-SteamLaunch', busy=True, error='Close the existing CS2 process')
+        self.assertFalse(self.target.exists())
+        self.assertFalse((self.game / 'ReShade.ini').exists())
+        self.assertFalse(self.state.exists())
 
     def test_install_conflict_and_restore_owned_file(self):
         self.command('Install')
@@ -86,7 +106,7 @@ class LoaderTests(unittest.TestCase):
         def quote(value):
             return "'" + str(value).replace("'", "''") + "'"
         script = self.root / 'preview.ps1'
-        script.write_text("$ErrorActionPreference='Stop'\n& " +
+        script.write_text("$ErrorActionPreference='Stop'\nfunction Get-CimInstance {param($Filter)}\n& " +
             quote(ROOT / 'scripts/launch-cs2-lab.ps1') + ' -StateFile ' + quote(self.state) +
             ' -Map ' + quote(map_name) + (' -HostProbe' if probe else '') +
             ' | ConvertTo-Json -Depth 5\n', encoding='utf8')
@@ -272,6 +292,19 @@ INVOKE_LAUNCHER
         self.assertEqual(len(receipts), 1)
         self.assertFalse(json.loads(receipts[0].read_text())['ProcessIdentityVerified'])
 
+    def test_steam_child_china_region_suffix_retains_offline_flags(self):
+        result = self.mock_steam_launch(suffix=' -perfectworld')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertTrue(receipt['ProcessIdentityVerified'])
+        self.assertIn('-insecure', receipt['Arguments'])
+        self.assertIn('-countercraft-lab', receipt['Arguments'])
+
+    def test_region_suffix_does_not_admit_connect(self):
+        result = self.mock_steam_launch(suffix=' -perfectworld +connect external-server')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('arguments differ', result.stderr)
+
     def test_steam_child_wrong_parent_is_refused(self):
         result = self.mock_steam_launch(parent=19)
         self.assertNotEqual(result.returncode, 0)
@@ -294,6 +327,11 @@ INVOKE_LAUNCHER
         result = self.mock_steam_launch(vanilla=True, suffix=' -secure')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('arguments differ', result.stderr)
+
+    def test_vanilla_offline_china_region_suffix(self):
+        result = self.mock_steam_launch(vanilla=True, suffix=' -perfectworld')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)['ProcessIdentityVerified'])
 
     # Fixtures remain under .local as failure evidence; no recursive cleanup/game changes.
 

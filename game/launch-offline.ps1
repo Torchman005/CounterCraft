@@ -41,7 +41,8 @@ do {
 if($started.Count -ne 1 -or $started[0].ExecutablePath -ne $cs2 -or $started[0].ParentProcessId -ne $steamProcesses[0].ProcessId) {
     throw 'Steam did not start the exact CS2 executable as its child.'
 }
-$expectedLine='^"?' + [regex]::Escape($cs2) + '"?\s+(?:-steam\s+)?' + [regex]::Escape(($launchArguments -join ' ')) + '\s*$'
+# Steam's China region suffix does not replace the required offline arguments.
+$expectedLine='^"?' + [regex]::Escape($cs2) + '"?\s+(?:-steam\s+)?' + [regex]::Escape(($launchArguments -join ' ')) + '(?:\s+-perfectworld)?\s*$'
 if($started[0].CommandLine -notmatch $expectedLine){throw 'Steam child arguments differ from the fixed offline arguments; inspect Steam launch options.'}
 $owned=Get-Process -Id $started[0].ProcessId
 if($owned.WaitForExit(5000)){throw 'Steam CS2 child exited during startup.'}
