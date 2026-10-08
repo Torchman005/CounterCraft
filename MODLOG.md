@@ -4,6 +4,14 @@ Started: 2026-10-06
 
 ## Guest gameplay action foundation (2026-10-08)
 
+Follow-up acceptance: exposed creative-only item selection via vanilla inventory
+packets and clarified `place` as target-air coordinates plus support face. Isolated
+live verifier passed: placed/mined (28,129,-16), one oak log -> four oak planks in
+slot 37, empty cursor. Player move out of one-block pit used collision resolution.
+An actual rendered downward view was exported through MC's existing capture path.
+Desktop screenshot/input issues do not invalidate the protocol/world evidence.
+Added `target` to expose the vanilla aim ray for the upcoming input adapter.
+
 - Added immutable requests and a bounded main-thread ActionQueue: capacity 32,
   eight executions/tick, 50 Hz admission, 400 ms TTL, monotonic IDs and world epoch.
   Pause/world switch/release/detected disconnect clear pending work; canceled

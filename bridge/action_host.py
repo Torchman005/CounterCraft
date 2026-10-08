@@ -45,9 +45,12 @@ def main():
         if name != "inspect":
             block.add_argument("face", choices=("up", "down", "north", "south", "east", "west"))
     select = sub.add_parser("select"); select.add_argument("slot", type=int, choices=range(9))
+    creative = sub.add_parser("creative"); creative.add_argument("slot", type=int, choices=range(9))
+    creative.add_argument("item"); creative.add_argument("count", type=int, choices=range(1, 65))
     click = sub.add_parser("click"); click.add_argument("slot", type=int, choices=range(46))
     click.add_argument("button", type=int, choices=(0, 1))
     sub.add_parser("inventory")
+    sub.add_parser("target")
     args = vars(parser.parse_args()); port, kind = args.pop("port"), args.pop("action")
     with socket.create_connection(("127.0.0.1", port), timeout=3) as client, client.makefile("rb") as reader:
         print(json.dumps(Actions(client, reader).act(kind, **args)))

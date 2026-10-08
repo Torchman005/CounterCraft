@@ -65,7 +65,10 @@ class ActionQueueTest {
                 "\"action\":\"break\",\"block\":[0,64,0],\"face\":\"bad\"",
                 "\"action\":\"move\",\"delta\":[3,0,0]",
                 "\"action\":\"move\",\"delta\":[\"0\",0,0]",
-                "\"action\":\"click\",\"slot\":0,\"button\":2")) {
+                "\"action\":\"click\",\"slot\":0,\"button\":2",
+                "\"action\":\"creative\",\"slot\":9,\"item\":\"minecraft:stone\",\"count\":1",
+                "\"action\":\"creative\",\"slot\":0,\"item\":\"bad id\",\"count\":1",
+                "\"action\":\"creative\",\"slot\":0,\"item\":\"minecraft:stone\",\"count\":65")) {
             assertThrows(RuntimeException.class, () -> ActionQueue.parse(JsonParser.parseString("{\"id\":1,\"epoch\":7,"+body+"}").getAsJsonObject()), body);
         }
     }

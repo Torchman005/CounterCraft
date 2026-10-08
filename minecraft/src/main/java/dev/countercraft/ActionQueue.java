@@ -11,7 +11,7 @@ public final class ActionQueue {
     public static final int CAPACITY = 32;
     public static final long TTL_NS = 400_000_000L, MIN_INTERVAL_NS = 20_000_000L;
     public record Action(long id, long epoch, String kind, double x, double y, double z,
-                         float yaw, float pitch, String face, int slot, int button) {}
+                         float yaw, float pitch, String face, int slot, int button, String item, int count) {}
     private record Pending(Action action, long time, CompletableFuture<JsonObject> result) {}
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
     private long lastId = -1, lastTime = Long.MIN_VALUE;
@@ -19,12 +19,13 @@ public final class ActionQueue {
     public static Action parse(JsonObject m) {
         long id = integer(m, "id"), epoch = integer(m, "epoch");
         String kind = m.get("action").getAsString();
-        if (id < 0 || epoch < 0 || !Set.of("look", "break", "place", "select", "inventory", "click", "inspect", "move").contains(kind))
+        if (id < 0 || epoch < 0 || !Set.of("look", "break", "place", "select", "inventory", "click", "inspect", "move", "creative", "target").contains(kind))
             throw new IllegalArgumentException("Unknown action or negative id/epoch");
         double x = 0, y = 0, z = 0;
         float yaw = 0, pitch = 0;
         String face = "up";
         int slot = 0, button = 0;
+        String item = ""; int count = 0;
         if (Set.of("break", "place", "inspect", "move").contains(kind)) {
             JsonArray p = m.getAsJsonArray(kind.equals("move") ? "delta" : "block");
             if (p == null || p.size() != 3) throw new IllegalArgumentException("Expected three coordinates");
@@ -44,9 +45,9 @@ public final class ActionQueue {
             if (!Set.of("up", "down", "north", "south", "east", "west").contains(face))
                 throw new IllegalArgumentException("Invalid block face");
         }
-        if (kind.equals("select") || kind.equals("click")) {
+        if (kind.equals("select") || kind.equals("click") || kind.equals("creative")) {
             long value = integer(m, "slot");
-            if (value < 0 || value > (kind.equals("select") ? 8 : 45)) throw new IllegalArgumentException("Invalid inventory slot");
+            if (value < 0 || value > (kind.equals("click") ? 45 : 8)) throw new IllegalArgumentException("Invalid inventory slot");
             slot = (int) value;
         }
         if (kind.equals("click")) {
@@ -54,7 +55,14 @@ public final class ActionQueue {
             if (value < 0 || value > 1) throw new IllegalArgumentException("Button must be 0 or 1");
             button = (int) value;
         }
-        return new Action(id, epoch, kind, x, y, z, yaw, pitch, face, slot, button);
+        if (kind.equals("creative")) {
+            item = m.get("item").getAsString();
+            if (item.length() > 128 || !item.matches("[a-z0-9_.-]+:[a-z0-9_./-]+")) throw new IllegalArgumentException("Invalid item id");
+            long value = integer(m, "count");
+            if (value < 1 || value > 64) throw new IllegalArgumentException("Invalid item count");
+            count = (int) value;
+        }
+        return new Action(id, epoch, kind, x, y, z, yaw, pitch, face, slot, button, item, count);
     }
     private static double number(JsonElement e) {
         if (e == null || !e.isJsonPrimitive() || !e.getAsJsonPrimitive().isNumber() || !Double.isFinite(e.getAsDouble()))
