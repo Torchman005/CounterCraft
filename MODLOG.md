@@ -797,3 +797,35 @@ launch, in-game test, rendering bridge, or complete port has been performed.
 - All 35 Python tests pass; native binaries are unchanged from the preceding 11-suite
   build. Source-only publish check: 94 files, zero failures, one reviewed journal path
   warning. Captured retail data and the exploratory NumPy script remain private.
+
+## Viewport transition boundary capture (2026-10-08)
+
+- Added opt-in startup trigger viewport-transitions. Existing draw-milestone policy
+  stays the default. A candidate's draw64 captures camera context; later changed
+  viewport states capture before their first draw. Metadata records prior/current
+  viewport and explicitly says bindings belong to the current draw. No inferred
+  weapon label, retail draw number, shader signature or main-camera selection.
+- State resets at each effect interval and on multi-viewport states. Existing owned
+  readback/writer/capacity limits remain in force. Unit fixtures verify stable state,
+  range entry/return, interval reset and request-file trigger preservation.
+- Native 11/11 CTest suites and Python 36/36 tests passed. Prepared isolated candidate
+  .local/cs2-viewport-boundary-candidate; existing exact snapshot matches restored game.
+  User had authorized offline operation; idle was 1680s before the brief new Steam run.
+- Exact owned PID 36484, Steam parent 16232, verified fixed -insecure lab arguments.
+  Entered local team and console commands, read pose screenshot. A subsequent round
+  restart respawned the player (visible in screenshot), so capture camera is not the
+  initially set pose and no fixed-pose claim is made for this session.
+- Three requests yielded same-frame triplets: draw64 world context, draw408 before
+  viewport [0,.95]->[0,.1] first draw, draw413 before return to [0,.95]. First boundary
+  depth has zero raw<.5 pixels, second has 84,597; private depth images inspected.
+  Current boundary CBs have no mathematical world-camera set. Pairing earlier same-frame
+  world camera with the pre-weapon depth is next; final-pass completeness still open.
+- Final captures queued/written=9/9, failures/controlFailures/pending/discarded=0,
+  busySkips=27, maxCallbackUs=7537. Counter excludes added per-draw viewport query cost:
+  diagnostic only, not a continuous performance claim. Final observer processed
+  159,127,737, known defined loss/deferred/overflow=0, devices/pending/runtimes=0.
+  D3D11 teardown reference warning 1307 remains unassigned.
+- Closed exact owned process gracefully and restored exact state file
+  .local/cs2-viewport-boundary-state.json; universal-modder backup diff added/removed/
+  changed are all empty. Captures and screenshots remain ignored.
+- Source publish check: 94 files, zero failures; reviewed MODLOG path warning only.

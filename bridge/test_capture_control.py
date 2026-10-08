@@ -45,5 +45,11 @@ class CaptureControlTests(unittest.TestCase):
         self.target.write_text(' '*4097)
         with self.assertRaises(ValueError): control.write_control(self.root)
 
+    def test_trigger_is_initialization_only_and_survives_requests(self):
+        control.write_control(self.root,True,'viewport-transitions')
+        control.write_control(self.root)
+        self.assertEqual(json.loads(self.target.read_text())['trigger'],'viewport-transitions')
+        with self.assertRaises(ValueError): control.write_control(self.root,trigger='draw-milestones')
+
 
 if __name__=='__main__': unittest.main()

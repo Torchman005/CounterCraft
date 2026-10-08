@@ -15,7 +15,7 @@
 namespace cc {
 namespace api=reshade::api;
 struct HostCapture::Impl {
-    struct Candidate { uint64_t id{},draws{}; };
+    struct Candidate { uint64_t id{},draws{}; ViewportCaptureSchedule schedule; };
     struct Device {
         std::unique_ptr<DepthReadback> readback;
         std::unordered_map<uint64_t,Candidate> candidates;
@@ -27,7 +27,7 @@ struct HostCapture::Impl {
     bool enabled{},installed{};
     std::filesystem::path directory;
     std::filesystem::path control_path;
-    bool manual{};
+    bool manual{},viewport_transitions{};
     CaptureRequests requests;
     std::atomic<uint64_t> control_failures{};
     std::mutex gpu_mutex,queue_mutex,error_mutex;
@@ -48,6 +48,7 @@ struct HostCapture::Impl {
                 std::ifstream input(control_path); const auto config=nlohmann::json::parse(input);
                 manual=config.value("manual",false);
                 if(manual) requests.initialize(capture_sequence(config));
+                viewport_transitions=capture_transitions(config);
             }
         }
     }
@@ -147,8 +148,18 @@ bool draw(api::command_list* cmd,uint32_t elements,uint32_t instances,uint32_t,u
             || capture->queued>=HostCapture::Impl::limit || capture->failures>=3) return false;
         const auto candidate=d.candidates.find(d.bound); if(candidate==d.candidates.end()) return false;
         auto& c=candidate->second; ++c.draws;
-        // Three distinct pre-draw points, not a guessed end-of-world pass.
-        if(c.draws!=64 && c.draws!=256 && c.draws!=512) return false;
+        UINT n=D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE; std::array<D3D11_VIEWPORT,16> v{};
+        std::optional<ViewportCaptureSchedule::Viewport> previous;
+        if(capture->viewport_transitions) {
+            context->RSGetViewports(&n,v.data());
+            if(n!=1) { c.schedule.reset(); return false; }
+            previous=c.schedule.previous;
+            if(!c.schedule.observe(c.draws,{v[0].TopLeftX,v[0].TopLeftY,v[0].Width,v[0].Height,v[0].MinDepth,v[0].MaxDepth})) return false;
+        } else {
+            // Three distinct pre-draw points, not a guessed end-of-world pass.
+            if(c.draws!=64 && c.draws!=256 && c.draws!=512) return false;
+            context->RSGetViewports(&n,v.data());
+        }
         const auto start=std::chrono::steady_clock::now();
         ComPtr<ID3D11DepthStencilView> dsv; context->OMGetRenderTargets(0,nullptr,&dsv); if(!dsv) return false;
         ComPtr<ID3D11Resource> resource; dsv->GetResource(&resource);
@@ -159,9 +170,16 @@ bool draw(api::command_list* cmd,uint32_t elements,uint32_t instances,uint32_t,u
         nlohmann::json metadata={{"schema",1},{"frame",d.frame},{"candidateId",c.id},{"candidateDraw",c.draws},
             {"deviceDraw",d.draws},{"elements",elements},{"instances",instances},{"timing","before-current-draw"},
             {"cameraDepthVerified",false},{"depthConvention","unverified"},{"outputSize",{d.width,d.height}}};
-        UINT n=D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE; std::array<D3D11_VIEWPORT,16> v{};
-        context->RSGetViewports(&n,v.data()); metadata["viewports"]=nlohmann::json::array();
+        metadata["viewports"]=nlohmann::json::array();
         for(UINT i=0;i<n;++i) metadata["viewports"].push_back({v[i].TopLeftX,v[i].TopLeftY,v[i].Width,v[i].Height,v[i].MinDepth,v[i].MaxDepth});
+        if(capture->viewport_transitions) {
+            metadata["trigger"]="viewport-transitions";
+            metadata["viewportTransitions"]=c.schedule.transitions;
+            metadata["previousViewport"]=previous?nlohmann::json(*previous):nlohmann::json(nullptr);
+            // Current bindings belong to the new draw. A preceding viewport is
+            // evidence about prior draws, not the new buffer's camera convention.
+            metadata["bindingTiming"]="current-draw-after-viewport-change-or-draw64";
+        }
         ComPtr<ID3D11DepthStencilState> state; UINT ref=0; context->OMGetDepthStencilState(&state,&ref);
         D3D11_DEPTH_STENCIL_DESC description{};
         if(state) state->GetDesc(&description);
@@ -185,7 +203,7 @@ void begin(api::effect_runtime* runtime,api::command_list* cmd,api::resource_vie
     std::unique_lock lock(capture->gpu_mutex,std::try_to_lock); if(!lock) { ++capture->busy; return; }
     try {
         auto& d=capture->devices[runtime->get_device()]; d.effects=true; d.bound=0;
-        ++d.frame; d.draws=0; for(auto& [_,c]:d.candidates) c.draws=0;
+        ++d.frame; d.draws=0; for(auto& [_,c]:d.candidates) { c.draws=0; c.schedule.reset(); }
         d.capture_frame=false;
         if(capture->manual) {
             if(const auto request=capture->requests.take(capture->queued<HostCapture::Impl::limit && capture->failures<3)) {
@@ -257,6 +275,7 @@ nlohmann::json HostCapture::report() const {
     return {{"enabled",true},{"limit",Impl::limit},{"periodFrames",Impl::period},
         {"manual",impl_->manual},{"requested",impl_->requests.requested.load()},{"consumed",impl_->requests.consumed.load()},
         {"controlFailures",impl_->control_failures.load()},
+        {"trigger",impl_->viewport_transitions?"viewport-transitions":"draw-milestones"},
         {"queued",impl_->queued.load()},{"written",impl_->written.load()},{"gpuPending",impl_->pending.load()},
         {"busySkips",impl_->busy.load()},{"failures",impl_->failures.load()},{"discardedPending",impl_->discarded.load()},
         {"maxCallbackUs",impl_->cpu_max_us.load()},{"lastFailure",impl_->last_failure},{"cameraDepthVerified",false}};
