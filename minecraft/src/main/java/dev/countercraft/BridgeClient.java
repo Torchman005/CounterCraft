@@ -18,6 +18,7 @@ public final class BridgeClient implements ClientModInitializer {
     private static volatile BridgeState.Pose framePose;
     private static FrameCapture captures;
     private static FrameStream frames;
+    private static final ActionQueue actions = new ActionQueue();
 
     @Override public void onInitializeClient() {
         if (!Boolean.getBoolean("countercraft.enabled")) {
@@ -27,7 +28,7 @@ public final class BridgeClient implements ClientModInitializer {
         try {
             captures = new FrameCapture(clientCaptureRoot());
             frames = new FrameStream();
-            HostServer server = new HostServer(STATE, Integer.getInteger("countercraft.port", 37122), captures::request, frames);
+            HostServer server = new HostServer(STATE, Integer.getInteger("countercraft.port", 37122), captures::request, frames, actions);
             enabled = true;
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try { server.close(); } catch (Exception ignored) { }
@@ -43,12 +44,13 @@ public final class BridgeClient implements ClientModInitializer {
 
     public static void tick(MinecraftClient client) {
         if (!enabled) return;
-        if (previous != client.world) { previous = client.world; epoch++; STATE.release(); }
+        if (previous != client.world) { previous = client.world; epoch++; STATE.release(); actions.clear("World changed"); }
         boolean offline = client.world != null && client.player != null
                 && client.isInSingleplayer() && !client.isPaused();
         Vec3d pos = client.player == null ? Vec3d.ZERO : client.player.getEyePos();
         STATE.update(new BridgeState.World(epoch, offline, pos.x, pos.y, pos.z, System.nanoTime()));
-        if (!offline) STATE.release();
+        if (!offline) { STATE.release(); actions.clear("World paused or unavailable"); }
+        actions.tick(STATE.world(), System.nanoTime(), action -> PlayerActions.execute(client, action));
     }
 
     public static void beginFrame() {

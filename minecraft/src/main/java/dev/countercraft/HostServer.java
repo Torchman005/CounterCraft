@@ -19,6 +19,7 @@ public final class HostServer implements AutoCloseable {
     private final BridgeState state;
     private final CaptureProvider capture;
     private final StreamProvider stream;
+    private final ActionQueue actions;
     private final ServerSocket listener;
     private volatile Socket active;
     private final Thread worker;
@@ -31,9 +32,13 @@ public final class HostServer implements AutoCloseable {
         this(state, port, capture, null);
     }
     public HostServer(BridgeState state, int port, CaptureProvider capture, StreamProvider stream) throws IOException {
+        this(state, port, capture, stream, null);
+    }
+    public HostServer(BridgeState state, int port, CaptureProvider capture, StreamProvider stream, ActionQueue actions) throws IOException {
         this.state = state;
         this.capture = capture;
         this.stream = stream;
+        this.actions = actions;
         listener = new ServerSocket();
         listener.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 1);
         worker = new Thread(this::run, "CounterCraft-Host");
@@ -53,6 +58,7 @@ public final class HostServer implements AutoCloseable {
                 // A host can disconnect at any time; a later connection starts fresh.
             } finally {
                 state.release();
+                if (actions != null) actions.reset();
                 if (stream != null) stream.stop();
                 active = null;
             }
@@ -82,6 +88,7 @@ public final class HostServer implements AutoCloseable {
                     reply.addProperty("renderer", false);
                     reply.addProperty("capture", capture != null);
                     reply.addProperty("stream", stream != null);
+                    reply.addProperty("actions", actions != null);
                 } else if (type.equals("status") || type.equals("ping")) {
                     BridgeState.World w = state.world();
                     reply.addProperty("type", "status");
@@ -93,6 +100,19 @@ public final class HostServer implements AutoCloseable {
                     reply.add("position", pos);
                     reply.addProperty("serverMonotonicNanos", System.nanoTime());
                     if (stream != null) reply.add("stream", stream.status());
+                } else if (type.equals("action")) {
+                    if (actions == null) throw new IllegalArgumentException("No action provider");
+                    var pending = actions.submit(ActionQueue.parse(m), state.world(), System.nanoTime());
+                    try {
+                        reply = pending.get(750, TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException interrupted) {
+                        pending.cancel(false); Thread.currentThread().interrupt();
+                        throw new IllegalStateException("Action interrupted");
+                    } catch (TimeoutException timeout) {
+                        pending.cancel(false); throw new IllegalArgumentException("Action timed out before execution");
+                    } catch (ExecutionException failure) {
+                        throw new IllegalArgumentException(failure.getCause().getMessage());
+                    }
                 } else if (type.equals("camera")) {
                     long frame = integer(m, "frame");
                     if (frame <= last) throw new IllegalArgumentException("Frame must increase");
@@ -106,6 +126,7 @@ public final class HostServer implements AutoCloseable {
                     reply.addProperty("frame", frame);
                 } else if (type.equals("release")) {
                     state.release();
+                    if (actions != null) actions.clear("Host released control");
                     reply.addProperty("type", "released");
                 } else if (type.equals("stream-start")) {
                     BridgeState.World w = state.world();
@@ -140,7 +161,8 @@ public final class HostServer implements AutoCloseable {
             } catch (RuntimeException invalid) {
                 JsonObject error = new JsonObject();
                 error.addProperty("type", "error");
-                error.addProperty("message", "Invalid or unavailable request: " + invalid.getClass().getSimpleName());
+                String reason = invalid.getMessage();
+                error.addProperty("message", reason == null ? "Malformed request" : reason.substring(0, Math.min(160, reason.length())));
                 send(out, error);
                 return;
             }
@@ -187,6 +209,7 @@ public final class HostServer implements AutoCloseable {
         Socket socket = active;
         if (socket != null) socket.close();
         state.release();
+        if (actions != null) actions.reset();
         if (stream != null) stream.stop();
     }
 }

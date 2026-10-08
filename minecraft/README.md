@@ -2,9 +2,10 @@
 
 This Fabric client mod accepts camera position, yaw/pitch and vertical FOV over
 local TCP, exports an on-demand world colour/depth bundle and streams bounded
-binary world frames with asynchronous GPU readback. It does **not**
-move the simulated player, forward clicks, share GPU textures or draw
-anything in CS2 yet.
+binary world frames with asynchronous GPU readback. Bounded main-thread actions
+expose player movement/look, mining, block use and inventory clicks over loopback;
+CS2 input routing is not yet connected. See [actions](../docs/gameplay-actions.md).
+GPU textures are not shared.
 
 **Validation status:** the full Fabric build succeeded and produced the mod jar.
 The Java network/state/capture protocol tests pass under Gradle. The development client

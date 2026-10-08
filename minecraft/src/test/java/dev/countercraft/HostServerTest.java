@@ -216,4 +216,30 @@ class HostServerTest {
         out.write((value + "\n").getBytes(StandardCharsets.UTF_8));
         out.flush();
     }
+
+    @Test void actionAcknowledgesExecutionAndReportsFailureReason() throws Exception {
+        BridgeState state = new BridgeState(); ActionQueue queue = new ActionQueue();
+        try (HostServer server = new HostServer(state, 0, null, null, queue);
+             Socket client = new Socket("127.0.0.1", server.port())) {
+            client.setSoTimeout(2000);
+            BufferedReader reader = new BufferedReader(new InputStreamReader(client.getInputStream()));
+            send(client.getOutputStream(), "{\"v\":1,\"type\":\"hello\",\"role\":\"test\"}");
+            assertTrue(reply(reader).get("actions").getAsBoolean());
+            state.update(new BridgeState.World(7,true,0,64,0,System.nanoTime()));
+            send(client.getOutputStream(), "{\"v\":1,\"type\":\"action\",\"id\":1,\"epoch\":7,\"action\":\"look\",\"yaw\":0,\"pitch\":0}");
+            AtomicReference<Thread> executor = new AtomicReference<>();
+            long deadline = System.nanoTime()+500_000_000;
+            while (executor.get()==null && System.nanoTime()<deadline) {
+                queue.tick(state.world(),System.nanoTime(),a -> { executor.set(Thread.currentThread()); return new JsonObject(); });
+                Thread.sleep(2);
+            }
+            assertSame(Thread.currentThread(), executor.get());
+            assertEquals("action-ack", reply(reader).get("type").getAsString());
+            send(client.getOutputStream(), "{\"v\":1,\"type\":\"action\",\"id\":2,\"epoch\":6,\"action\":\"inventory\"}");
+            var error = reply(reader);
+            assertEquals("error", error.get("type").getAsString());
+            assertTrue(error.get("message").getAsString().contains("epoch"));
+            assertNull(reader.readLine());
+        }
+    }
 }

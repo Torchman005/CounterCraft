@@ -2,6 +2,28 @@
 
 Started: 2026-10-06
 
+## Guest gameplay action foundation (2026-10-08)
+
+- Added immutable requests and a bounded main-thread ActionQueue: capacity 32,
+  eight executions/tick, 50 Hz admission, 400 ms TTL, monotonic IDs and world epoch.
+  Pause/world switch/release/detected disconnect clear pending work; canceled
+  futures do not execute. Replies now retain bounded specific rejection reasons.
+- Added vanilla player look/collision movement, visible-face mining/placement,
+  hotbar selection, player inventory reads and PICKUP/crafting-slot clicks.
+  Acknowledgement means client execution, not server acceptance; inspect afterwards.
+- Backed up the isolated lab before interaction with universal-modder:
+  countercraft-actions-20261008/20261008-184431.zip (43 files, 20.1 MB).
+  Launched Fabric with background/null audio, existing CounterCraft Lab save.
+- Live inventory returned all 46 slots, player feet/health and selection. Grass at
+  (26,129,-16) became air after a break request and remained air on a new connection.
+  Adjacent obstructed face was correctly refused with the specific reason. No
+  relaxed raycast patch was applied. Placement/crafting remain unverified.
+- Desktop capture returned white/error; fallback game capture timed out. UI inputs
+  were not observably processed; do not count them as successful gameplay evidence.
+- Gradle tests: 23 passed (six new queue tests and one network execution test).
+  Existing Python 40/40 and native CTest 13/13 regressions passed. No game assets
+  or captures are included. CS2 input, live depth fusion and player coupling remain.
+
 ## Bounded background host observer (2026-10-08)
 
 - Continued from pushed `973ecf7` with standing authorization for offline tests
