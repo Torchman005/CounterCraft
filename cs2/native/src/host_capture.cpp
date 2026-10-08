@@ -1,4 +1,5 @@
 #include "host_capture.hpp"
+#include "capture_control.hpp"
 #include "depth_readback.hpp"
 #include "depth_view.hpp"
 #include <reshade.hpp>
@@ -20,10 +21,15 @@ struct HostCapture::Impl {
         std::unordered_map<uint64_t,Candidate> candidates;
         uint64_t bound{},frame{},draws{};
         uint32_t width{},height{};
-        bool effects{};
+        bool effects{},capture_frame{};
+        uint64_t request{};
     };
     bool enabled{},installed{};
     std::filesystem::path directory;
+    std::filesystem::path control_path;
+    bool manual{};
+    CaptureRequests requests;
+    std::atomic<uint64_t> control_failures{};
     std::mutex gpu_mutex,queue_mutex,error_mutex;
     std::unordered_map<api::device*,Device> devices;
     std::deque<DepthCaptureFrame> queue;
@@ -34,7 +40,16 @@ struct HostCapture::Impl {
     std::atomic<uint64_t> queued{},written{},busy{},failures{},discarded{},cpu_max_us{},next_id{1},pending{};
     static constexpr uint64_t limit=18,period=240;
     explicit Impl(bool e,const std::filesystem::path& base):enabled(e) {
-        if(e) { directory=base/"captures"/("session-"+std::to_string(GetTickCount64())); std::filesystem::create_directories(directory); }
+        if(e) {
+            directory=base/"captures"/("session-"+std::to_string(GetTickCount64())); std::filesystem::create_directories(directory);
+            control_path=base/"capture-control.json";
+            if(std::filesystem::exists(control_path)) {
+                if(std::filesystem::file_size(control_path)>4096) throw std::runtime_error("Capture control exceeds 4KiB");
+                std::ifstream input(control_path); const auto config=nlohmann::json::parse(input);
+                manual=config.value("manual",false);
+                if(manual) requests.initialize(capture_sequence(config));
+            }
+        }
     }
     void measure(std::chrono::steady_clock::time_point start) {
         const auto us=uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-start).count());
@@ -59,9 +74,20 @@ struct HostCapture::Impl {
     void writer_loop() {
         for(;;) {
             DepthCaptureFrame frame;
-            { std::unique_lock lock(queue_mutex); wake.wait(lock,[&]{return ending || !queue.empty();});
-              if(queue.empty()) return;
-              frame=std::move(queue.front()); queue.pop_front(); }
+            bool have_frame=false;
+            { std::unique_lock lock(queue_mutex); wake.wait_for(lock,std::chrono::milliseconds(100),[&]{return ending || !queue.empty();});
+              if(ending && queue.empty()) return;
+              if(!queue.empty()) { frame=std::move(queue.front()); queue.pop_front(); have_frame=true; } }
+            if(manual) {
+                // File IO stays on this private diagnostic worker. A request
+                // arms ONE future host interval, and never resets the total cap.
+                try {
+                    if(std::filesystem::file_size(control_path)>4096) throw std::runtime_error("Capture control exceeds 4KiB");
+                    std::ifstream input(control_path);
+                    requests.observe(capture_sequence(nlohmann::json::parse(input)));
+                } catch(...) { ++control_failures; }
+            }
+            if(!have_frame) continue;
             write_completed(std::move(frame));
         }
     }
@@ -117,7 +143,7 @@ bool draw(api::command_list* cmd,uint32_t elements,uint32_t instances,uint32_t,u
     try {
         const auto found=capture->devices.find(cmd->get_device()); if(found==capture->devices.end()) return false;
         auto& d=found->second; ++d.draws;
-        if(d.effects || !d.bound || d.frame<240 || d.frame%HostCapture::Impl::period!=0
+        if(d.effects || !d.bound || !d.capture_frame
             || capture->queued>=HostCapture::Impl::limit || capture->failures>=3) return false;
         const auto candidate=d.candidates.find(d.bound); if(candidate==d.candidates.end()) return false;
         auto& c=candidate->second; ++c.draws;
@@ -143,6 +169,7 @@ bool draw(api::command_list* cmd,uint32_t elements,uint32_t instances,uint32_t,u
         metadata["depthState"]={{"enabled",bool(description.DepthEnable)},{"writeMask",uint32_t(description.DepthWriteMask)},
             {"comparison",uint32_t(description.DepthFunc)},{"stencilRef",ref}};
         metadata["captureId"]=capture->queued.load()+1;
+        metadata["request"]=capture->manual?nlohmann::json(d.request):nlohmann::json(nullptr);
         if(d.readback->enqueue(context,depth.Get(),std::move(metadata))) ++capture->queued; else ++capture->busy;
         capture->recount(); capture->measure(start);
     } catch(const std::exception& e) { capture->failed(e.what()); } catch(...) { capture->failed("Unknown draw capture failure"); }
@@ -159,6 +186,15 @@ void begin(api::effect_runtime* runtime,api::command_list* cmd,api::resource_vie
     try {
         auto& d=capture->devices[runtime->get_device()]; d.effects=true; d.bound=0;
         ++d.frame; d.draws=0; for(auto& [_,c]:d.candidates) c.draws=0;
+        d.capture_frame=false;
+        if(capture->manual) {
+            if(const auto request=capture->requests.take(capture->queued<HostCapture::Impl::limit && capture->failures<3)) {
+                // Consume exactly one sequence value per effect interval. This
+                // preserves queued operator requests when the file is updated
+                // faster than the host reaches a new interval.
+                d.request=*request; d.capture_frame=true;
+            }
+        } else d.capture_frame=d.frame>=240 && d.frame%HostCapture::Impl::period==0;
         runtime->get_screenshot_width_and_height(&d.width,&d.height);
         if(d.readback && d.readback->pending()) {
             std::unique_lock queue_lock(capture->queue_mutex,std::try_to_lock);
@@ -219,6 +255,8 @@ nlohmann::json HostCapture::report() const {
     if(!impl_->enabled) return {{"enabled",false}};
     std::lock_guard lock(impl_->error_mutex);
     return {{"enabled",true},{"limit",Impl::limit},{"periodFrames",Impl::period},
+        {"manual",impl_->manual},{"requested",impl_->requests.requested.load()},{"consumed",impl_->requests.consumed.load()},
+        {"controlFailures",impl_->control_failures.load()},
         {"queued",impl_->queued.load()},{"written",impl_->written.load()},{"gpuPending",impl_->pending.load()},
         {"busySkips",impl_->busy.load()},{"failures",impl_->failures.load()},{"discardedPending",impl_->discarded.load()},
         {"maxCallbackUs",impl_->cpu_max_us.load()},{"lastFailure",impl_->last_failure},{"cameraDepthVerified",false}};

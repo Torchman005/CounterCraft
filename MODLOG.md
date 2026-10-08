@@ -735,3 +735,40 @@ launch, in-game test, rendering bridge, or complete port has been performed.
   host selection or gameplay. No additional game launch required for these claims.
   Next: explicitly trigger captures at controlled offline poses, verify angles,
   camera height/lens and depth silhouette, then a world cube and live relay.
+
+## Controlled offline camera oracle and manual capture (2026-10-08)
+
+- Added `scripts/request-depth-capture.py` and four Python tests. Initialization uses
+  exclusive creation; later requests are atomic replacements, reject malformed or
+  invalid values, and never reset a sequence. The native reader ignores older values.
+  The control file is private runtime
+  state and remains ignored.
+- Added native capture-control parsing/sequence tests. A missing/unreadable control
+  file increments controlFailures and is retried without dropping completed GPU data.
+  The consumer starts from the file's current sequence,
+  consumes exactly one request per eligible effect interval, and preserves queued
+  requests when operators issue them faster than intervals. The lifetime cap remains 18.
+- Rebuilt native code: 11/11 CTest suites and 30/30 Python tests passed.
+  The real-game run used the initial manual-trigger implementation; sequence backlog/
+  startup-baseline hardening was added afterwards and requires its own runtime check.
+  A real
+  Steam-launched `-insecure` Dust2 session produced captures 16-18 for request 6 with
+  `queued=18`, `written=18`, `failures=0`, `pending=0`; the observer had `missedEvents=6799`
+  from a full queue during the long diagnostic run, so this session is not loss-free.
+  Final capture controlFailures=1, busySkips=1, maxCallbackUs=9009, discarded=0.
+  Final observer processed=3,603,590,237, devices/pending/runtimes=0; teardown D3D11
+  reference-count warning 1691 remains unattributed.
+- Controlled poses were entered only through the local CS2 console. At foot position
+  `(-1272,-537,250)` and angles `(0,0,0)`, the derived eye was `(-1272,-537,314)`.
+  At `(-1200,-500,300)` and `(-20,140,0)`, the derived eye was
+  `(-1183.2318,-514.0700,360.1404)`; yaw/pitch differed from the console by <0.00001°.
+  The 64-unit displacement fits the camera up vector in these samples; the cause and
+  primary-world-camera identity are not independently established. No corrective
+  transform was added to hide the discrepancy. Final world-pass identity,
+  unit scale, depth fusion, and gameplay remain open.
+- The owned CS2 process was closed by exact PID before restoring the recorded loader and
+  bootstrap. Universal-modder backup diff is empty. No game files, captures, screenshots,
+  or private diagnostics were added to the source tree.
+- Source-only publish check: 92 files, zero failures, one reviewed MODLOG absolute-path
+  warning retained for reproducible local recovery. Existing loader and Java fixture
+  results are prior-stage evidence, not newly rerun checks.
