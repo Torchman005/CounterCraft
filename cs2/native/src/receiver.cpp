@@ -95,7 +95,7 @@ public:
 };
 }
 
-Receiver::Receiver(uint16_t port, unsigned fps) : port_(port), fps_(fps) {
+Receiver::Receiver(uint16_t port, unsigned fps, bool gameplay) : port_(port), fps_(fps), gameplay_(gameplay) {
     if (!port || fps < 1 || fps > 30) throw std::runtime_error("Invalid receiver port/FPS");
     worker_ = std::thread(&Receiver::run,this);
 }
@@ -125,12 +125,31 @@ void Receiver::submit_camera(const HostCamera& camera,uint64_t sequence,int64_t 
 double Receiver::age_ms(const Frame& frame) const {
     return (double(monotonic_ns()) - double(clock_offset_.load()) - double(frame.metadata.captured_ns)) / 1e6;
 }
+void Receiver::submit_input(Input value) {
+    if(!gameplay_)return;
+    if(!std::isfinite(value.yaw) || !std::isfinite(value.pitch) || std::abs(value.pitch)>90
+        || !std::isfinite(value.forward) || std::abs(value.forward)>1 || !std::isfinite(value.sideways) || std::abs(value.sideways)>1
+        || !std::isfinite(value.mouse_x) || value.mouse_x<0 || value.mouse_x>1 || !std::isfinite(value.mouse_y)
+        || value.mouse_y<0 || value.mouse_y>1 || value.slot<0 || value.slot>8
+        || value.scroll < -1'000'000 || value.scroll > 1'000'000 || value.captured_ns<=0)
+        throw std::runtime_error("Invalid gameplay input");
+    std::lock_guard lock(mutex_);input_=value;
+}
 void Receiver::run() {
+    do {
+        session();
+        if(!gameplay_ || stop_)return;
+        for(int i=0;i<50 && !stop_;++i)std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        {std::lock_guard lock(mutex_);++stats_.reconnects;input_.reset();}
+    }while(!stop_);
+}
+void Receiver::session() {
     try {
         Winsock winsock;
         Socket control(port_,stop_);
         json ready = control.request({{"type","hello"},{"role","test"}},stop_);
         if (ready.at("type") != "ready" || ready.at("stream") != true) throw std::runtime_error("No Minecraft frame stream");
+        if(gameplay_ && !ready.value("input",false))throw std::runtime_error("No Minecraft gameplay input provider");
         int64_t best_rtt = INT64_MAX;
         json status;
         for (int i = 0; i < 5; ++i) {
@@ -141,7 +160,9 @@ void Receiver::run() {
             }
         }
         if (status.at("offline") != true) throw std::runtime_error("Minecraft lab is paused or not singleplayer");
-        json start = control.request({{"type","stream-start"},{"fps",fps_}},stop_);
+        json request_start={{"type","stream-start"},{"fps",fps_}};
+        if(gameplay_)request_start["fullClient"]=true;
+        json start = control.request(request_start,stop_);
         if (start.at("type") != "stream-started" || start.at("host") != "127.0.0.1"
             || !start.at("port").is_number_integer()) throw std::runtime_error("Wrong stream endpoint");
         int binary_port = start.at("port").get<int>();
@@ -149,10 +170,11 @@ void Receiver::run() {
         Session session = Session::parse(start.at("session").get<std::string>());
         const int64_t epoch = start.at("epoch").get<int64_t>();
         Socket binary(uint16_t(binary_port),stop_);
-        { std::lock_guard lock(mutex_); stats_.connected = true; stats_.clock_uncertainty_ns = best_rtt / 2; }
+        { std::lock_guard lock(mutex_); stats_.connected = true; stats_.failure.clear(); stats_.clock_uncertainty_ns = best_rtt / 2; }
         uint64_t sequence = 0;
         int64_t next_ping = monotonic_ns();
         int64_t next_camera = monotonic_ns();
+        int64_t next_input = 0; uint64_t input_id=0; bool input_active=false;
         uint64_t sent_camera=0;
         bool camera_active=false,anchored=false;
         std::array<double,3> source_anchor{},guest_anchor{};
@@ -164,7 +186,26 @@ void Receiver::run() {
         std::deque<ExpectedPose> expected_poses;
         auto heartbeat = [&] {
             const auto now=monotonic_ns();
-            if(now>=next_camera) {
+            if(gameplay_ && now>=next_input) {
+                std::optional<Input> in;
+                {std::lock_guard lock(mutex_);in=input_;}
+                const bool fresh=in && now>=in->captured_ns && now-in->captured_ns<250'000'000;
+                if(fresh) {
+                    const auto& v=*in;
+                    const auto ack=control.request({{"type","input"},{"id",++input_id},{"epoch",epoch},
+                        {"yaw",v.yaw},{"pitch",v.pitch},{"forward",v.forward},{"sideways",v.sideways},{"slot",v.slot},
+                        {"jump",v.jump},{"sneak",v.sneak},{"sprint",v.sprint},{"attack",v.attack},{"use",v.use},
+                        {"inventory",v.inventory},{"escape",v.escape},{"mouseX",v.mouse_x},{"mouseY",v.mouse_y},
+                        {"drop",v.drop},{"swap",v.swap},{"pick",v.pick},{"scroll",v.scroll}},stop_);
+                    if(ack.at("type")!="input-ack" || ack.at("id")!=input_id || ack.at("epoch")!=epoch)
+                        throw std::runtime_error("Gameplay input acknowledgement mismatch");
+                    input_active=true;{std::lock_guard lock(mutex_);++stats_.inputs_sent;}
+                }else if(input_active) {
+                    control.request({{"type","release"}},stop_);input_active=false;
+                }
+                next_input=monotonic_ns()+33'333'333;
+            }
+            if(!gameplay_ && now>=next_camera) {
                 std::optional<CameraUpdate> update;
                 {std::lock_guard lock(mutex_);update=camera_;}
                 const bool fresh=update && now>=update->captured_ns && now-update->captured_ns<250'000'000;
@@ -196,6 +237,7 @@ void Receiver::run() {
                 json heartbeat = control.request({{"type","ping"}},stop_);
                 if (heartbeat.at("offline") != true || heartbeat.at("epoch") != epoch
                     || heartbeat.at("stream").at("running") != true) throw std::runtime_error("World/stream unavailable");
+                if(gameplay_) {std::lock_guard lock(mutex_);stats_.player_status=heartbeat.value("player",json::object());}
                 next_ping = monotonic_ns() + 250'000'000;
             }
         };
@@ -210,6 +252,7 @@ void Receiver::run() {
             binary.receive(metadata,deadline,stop_,heartbeat);
             auto frame = std::make_shared<Frame>(); frame->header = h;
             frame->metadata = decode_metadata(std::string(metadata.begin(),metadata.end()),h,epoch);
+            if(frame->metadata.full_client!=gameplay_)throw std::runtime_error("Unexpected Minecraft client layer mode");
             frame->pixels.resize(size_t(h.color_bytes) + h.depth_bytes);
             binary.receive(frame->pixels,deadline,stop_,heartbeat);
             if (crc32(frame->pixels,crc32(metadata)) != h.crc) throw std::runtime_error("Frame CRC mismatch");
@@ -230,6 +273,7 @@ void Receiver::run() {
             }
             frame->received_ns = monotonic_ns(); sequence = h.sequence;
             std::lock_guard lock(mutex_); ++stats_.received;
+            if(gameplay_) {stats_.player_eye=frame->metadata.position;stats_.player_rotation=frame->metadata.rotation;stats_.gui_open=frame->metadata.gui_open;}
             if(rendered_camera)++stats_.cameras_rendered;
             if (std::abs(age_ms(*frame)) > 500) { ++stats_.stale; continue; }
             if (latest_ && latest_->header.sequence > last_observed_) ++stats_.replaced;

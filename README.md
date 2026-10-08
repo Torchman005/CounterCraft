@@ -1,79 +1,41 @@
 # CounterCraft
 
-目标：在 **CS2 本机离线模式**中接入真实 Minecraft Java 模拟，包括方块、合成、生物等系统。
+目标：在 **CS2 本机离线模式**中接入真实 Minecraft Java 模拟，包括建造、挖矿、合成、生物和红石。
 
-**当前状态：已在真实离线 CS2 中显示 MC 诊断预览，尚不能游玩完整 Minecraft。** 已实现 Python 协议诊断端点、坐标转换、环境检查，以及 Fabric 1.20.1 相机接收、世界颜色/深度导出、GPU 异步读回和有界本机帧流。CS2 实时相机已进入 MC 并核对实际回传视角；世界深度融合和玩法输入尚未接通。
+**当前是可操作的离线桥接原型，尚未完成两个世界的融合。** Minecraft 1.20.1 Fabric 在独立进程运行，CS2 的 ReShade 插件显示完整 MC 画面、手部、HUD 和库存，并传递键鼠输入。移动由 MC 原版碰撞和重力处理；这不是 MC 方块已经进入 Dust2，也不支持官方匹配。
 
-插件 `universal-modder 0.2.0` 已核验安装启用。完整 Fabric 构建成功，已生成模组 jar。在独立单人测试世界中，相机请求、实际渲染参数、真实地形深度和释放后的恢复通过。新增帧流用三槽 PBO/fence 异步读回，通过本机 TCP 发送 RGBA、深度和同帧矩阵；慢消费只保留最新帧。这仍是 CPU 拷贝原型，不是 GPU 共享纹理。
+已实测：CS2 中的移动、鼠标转向、创造库存取物、挖除与 R 键放置；MC 动作接口的放置、挖掘、2×2 原版合成；持续拉弓和释放。新加入滚轮、丢弃、副手交换、库存拖动与修饰键，未逐项完成 CS2 场景验收。暂停、断流和换世界会释放输入；玩法接收端重新握手，不复用旧 epoch。
 
-当前验证：40 项 Python、13 组原生 CTest 和 28 项安装/恢复/Steam 启动检查通过；未改动的 Java 代码在上一阶段通过 16 项 Gradle 测试。真实 1280×720 帧流测试中，20 FPS 上限下实收约 18.4 FPS，延迟估计 P95 约 43 毫秒；相机、投影、深度、释放、慢接收端超时及重连通过。真实暂停后的帧流关闭和预览消失已验证；缩放和切换世界仍待检查。详见 [帧流协议](docs/frame-stream.md) 与 [MODLOG.md](MODLOG.md)。
+现有 PCL/OptiFine 实例和存档未修改。使用隔离的 Fabric 1.20.1 开发实例，不能与 OptiFine 混用。帧传输是有界 CPU 拷贝原型，20 FPS 上限，不承诺 60 FPS。CS2 世界深度、相机读回和 GPU 遮挡实验仍是单独诊断能力，尚未接入玩法融合。退出时的 D3D11 引用计数提示仍未归因。
 
-Windows x64 接收端和独立 D3D11 合成实验已验证。真实 MC 原生合成测试中，10 秒接收/上传 180 帧，延迟估计 P95 约 112 毫秒。离线 ReShade 6.8.0 实测确认 CS2 的 D3D11 回调、纹理上传和 FX 编译；Dust2 上出现 MC 地形/天空诊断预览，MC 暂停后预览消失。一轮会话接收 6660 帧、上传 5367 帧、资源创建失败为零；这些总数包含启动阶段，不能作为 FPS 基准。诊断预览仍不代表世界深度融合。
+## 使用和检查
 
-2026-10-07 测试正常退出，临时 `dxgi.dll` 已移除，当时 CS2 `win64` 目录与安装前备份完全一致。仅加载 ReShade 的对照会话也有退出时的 D3D11 引用计数提示，资源泄漏仍不能排除。构建、安装和恢复步骤见 [原生实验说明](cs2/native/README.md)。
+依赖 Windows x64、PowerShell 7.4+、Python 3、JDK 17+、Gradle 8.14、MSVC x64，及用户自己的 Minecraft/CS2。构建和独立客户端启动见 [Minecraft 说明](minecraft/README.md)；本机 ReShade 准备、Steam 启动和恢复见 [原生说明](cs2/native/README.md)。
 
-2026-10-08 重装后已通过 Steam 进入离线 Dust2，并拿到只读宿主深度候选统计。143 份报告中 137 份包含资源候选，结束时丢失事件 20 次、延迟事件和容量溢出均为零；仍不代表完整覆盖或已选定世界深度。相机和世界融合尚未接通。临时加载器与配置已恢复，游戏目录与本轮新备份一致。显式投影/单位换算及 48 种独立硬件 GPU 遮挡检查通过，见 [宿主深度实验说明](docs/host-depth-probe.md)。
-
-深度视图归一化已补上单采样、多采样、数组和默认子资源范围，新增有界视图细分统计；其中 inventory 覆盖 16 类检查。修复本机 MSVC/Ninja 头文件依赖缓存导致的混合旧对象后，干净候选在 Steam 离线 Dust2 产生 107 份报告，真实 2DMS/单采样视图分类与计数一致；该阶段最后丢失事件 159 次。
-
-后续已用有界无锁事件队列替换回调与报告的锁争用，新增并发/快照测试。真实离线 Dust2 产生 165 份报告（139 份有候选），最后排空 21,227,415 个事件，已定义的丢失/争用/异常/延迟/溢出均为零。快照构建 P95 为 59 微秒，单批后台排空最高 2388 微秒；这不是游戏帧率或渲染回调成本对照。正常退出后的 runtime、设备和积压均归零，临时文件已恢复、备份差异为空。世界深度身份、MSAA 读取和同帧相机仍待验证；退出引用计数警告仍未归因。
-
-新增显式 `-DepthCapture` 取证：真实离线 Dust2 导出 18 组 1680×1050 四倍 MSAA 深度和同次绘制绑定的常量缓冲。三槽异步 GPU 读回与独立写盘线程已验证，最后 16,976,442 个观察事件的已定义丢失计数为零，正常退出后资源和积压归零、备份差异为空。发现世界候选视口深度范围为 `[0,0.95]`，不能直接按 `[0,1]` 线性化。这是绘制前的部分通道证据，仍未验证完整世界深度、同帧相机或可玩融合；退出引用计数提示 1656 尚未归因。
-
-投影逆运算与独立 GPU 合成已支持实际发现的视口深度范围，四种范围的 192 个遮挡组合通过。新增离线缓冲分析器在 36 份真实捕获中找到投影/view/世界 VP/相机相对 VP 数学一致的候选，但它不读取游戏内存、没有固定零售偏移，仍需在已知位置和旋转下进行场景核验，尚不自动接通主相机。
-
-新增按请求取证和受控相机验证：三组角度匹配，位置差异符合相机向上方向的 64 单位偏移（残差小于 0.00013），成因和主世界相机身份仍待核实。手动取证导出 18/18 份，长会话存在 6,799 次观察事件丢失，未宣称无损覆盖。正常退出后加载器已恢复，备份差异为空；连续相机、真实遮挡和玩法尚未接通。
-
-视口边界取证已在离线 Dust2 抓到世界 `[0,.95]` 与武器 `[0,.1]` 的切换，取得枪写入前的深度。跨视角重投影支持原始相机矩阵；最终世界通道、连续同步和玩法仍待接通。详见 [深度验证记录](docs/host-depth-probe.md)。
-
-显式 `-CameraRelay` 已实现原生相机读回和本机转发，实机确认 3,308 帧实际 MC 视角匹配。后续发生一次原因未记录的 MC 拒绝请求，尚需验证断流恢复；主相机适用范围、分辨率比例和玩家同步仍有缺口。见 [相机桥接说明](docs/camera-relay.md)。
-
-## 本地检查
-
-MC 主线程动作队列已接入转向、碰撞位移、挖掘、放置和库存点击，带 epoch、超时、容量和频率限制。独立创造世界已验证方块放置/挖除、碰撞位移，以及原木合成四块木板并回读库存；CS2 输入仍待接通。见 [动作协议](docs/gameplay-actions.md)。
-
-无需第三方 Python 依赖。在仓库根目录执行：
+进入独立单人测试世界并关闭菜单后：
 
 ```powershell
-./game/preflight.ps1
-./game/launch-offline.ps1  # 仅预览，不启动游戏
+python -m bridge.health
+python -m bridge.verify_input  # 会移动玩家并开关库存，仅在测试存档执行
 python -m unittest discover -s bridge -p 'test_*.py' -v
-python -m bridge.bridge_server
 ```
 
-诊断服务器只绑定 `127.0.0.1:37121`，接收 JSON Lines。每个连接先发送：
-
-```json
-{"v":1,"type":"hello","role":"test"}
-```
-
-收到 `ready` 后可发送相机消息；回应 `ack` 仅表示协议校验成功，**不表示帧已渲染**。
-
-```json
-{"v":1,"type":"camera","frame":1,"position":[0,64,0],"rotation":[0,0,0],"fov":70}
-```
-
-坐标采用 MC 坐标，角度是 `[yaw,pitch,roll]`，`fov` 是垂直视场角。Source 的水平 FOV 必须由未来适配器按实际画面宽高转换。相机帧号在连接内单调递增；读取时连续 5 秒未收到数据会断开，重连须重新握手。单条消息最多 64 KiB。该端点仅用于协议诊断，不负责转发、共享纹理或启动游戏。
-
-## 离线开发
-
-`./game/launch-offline.ps1 -Cs2Root '<当前安装目录>' -Launch` 才会通过已运行的 Steam 启动原版 CS2，参数为 `-insecure -console +sv_lan 1 +map de_dust2`。已有 CS2 进程或临时 ReShade 文件时会拒绝启动。直接运行游戏 exe 曾出现 Launcher Error #720；脚本已改用 Steam `-applaunch 730`，并核实实际子进程和离线参数。该脚本不安装 CounterCraft，启动参数也不构成网络防火墙；不要在开发会话中连接官方服务器。
-
-ReShade 诊断会话使用 `scripts/launch-cs2-lab.ps1`，需要 PowerShell 7.4+ 和 `manage-cs2-loader.ps1 -SteamLaunch` 记录的安装状态；默认也只预览。启动走 Steam，游戏目录的临时 `ReShade.ini` 仅将 BasePath 指向候选目录，完整配置、日志、效果和缓存留在仓库的忽略目录中。按状态文件恢复加载器和临时配置后再正常使用 CS2。
-
-现有 `1.20.1-OptiFine_I6` 实例和存档未修改。相机模组使用独立的 Fabric 1.20.1 开发实例，不支持 OptiFine 混用。构建、启动和本机相机测试见 [Minecraft 相机实验说明](minecraft/README.md)。
-
-进入开发客户端的单人测试世界后，可执行 `python -m bridge.minecraft_host --verify`，同时验证实际渲染相机、投影、世界深度与释放。`--capture` 仅导出一帧；产物保存在忽略的 `minecraft/run/countercraft/captures/` 中，不提交游戏画面或深度数据。
-
-连续帧流测试：
+推荐用受监督的入口：
 
 ```powershell
-python -m bridge.stream_host --verify --seconds 10 --fps 20
-python -m bridge.stream_host --seconds 10 --fps 30 --consumer-ms 200
+./game/play.ps1 -Cs2Root '<CS2 目录>'  # 默认只预览
+./game/play.ps1 -Mode Play -Cs2Root '<CS2 目录>' -BackupSnapshot '<安装前备份 ZIP>' -SessionDirectory '.local/my-session'
 ```
 
-接收端校验会话、世界、尺寸、帧序号及 CRC；请求的 FPS 是上限。测试输出实际接收数、替换数、旧帧数及延迟估计，不能据此承诺 60 FPS。
+MC 客户端须先进入独立单人世界。启动必须走已运行的 Steam `-applaunch 730`，使用 `-insecure`；不能直接运行 cs2.exe。F8 切换 MC 画面与输入。关闭 CS2 后，监督脚本验证原状态并恢复临时加载器。若终端被强制关闭，关闭 CS2 后用相同 `SessionDirectory` 执行 `-Mode Recover`，再正常使用 CS2。每轮使用新的会话目录，保留恢复记录。
 
-详见 [MODDING_PLAN.md](MODDING_PLAN.md) 和 [MODLOG.md](MODLOG.md)。插件安装可审阅 `scripts/install-plugin.ps1` 后在普通 PowerShell 中运行。插件安装与游戏适配是两个独立步骤。
+单独的 `scripts/launch-cs2-lab.ps1 -Gameplay -Launch` 仍保留供诊断使用；它需要已记录的加载器状态，退出后手动恢复。
 
-开发参考 [universal-modder](https://github.com/rehan-remade/universal-modder) 的 mashup-mods 工作流；Minecraft 适配使用 Fabric Loader、Fabric Loom 和 Yarn。代码由 Codex 协助开发，仓库只发布自有桥接源码。
+- [连续输入和画面协议](docs/gameplay-input.md)
+- [动作和合成协议](docs/gameplay-actions.md)
+- [帧流协议](docs/frame-stream.md)
+- [相机桥接实验](docs/camera-relay.md)
+- [宿主深度实验](docs/host-depth-probe.md)
+- [计划](MODDING_PLAN.md)与[验证记录](MODLOG.md)
+
+插件 `universal-modder 0.2.0` 已安装启用。参考 [universal-modder](https://github.com/rehan-remade/universal-modder) 的 mashup-mods 工作流；Minecraft 使用 Fabric Loader、Loom 和 Yarn，宿主使用 ReShade。代码由 Codex 协助开发；只发布自有桥接代码，不提交游戏资产、私人捕获或存档。

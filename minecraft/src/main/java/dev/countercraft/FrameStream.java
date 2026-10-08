@@ -24,30 +24,37 @@ public final class FrameStream implements HostServer.StreamProvider {
         int pbo, bytes;
         long fence, sequence, capturedNanos;
         JsonObject metadata;
+        boolean pendingColor;
     }
     private static final class Session {
         final long epoch, interval;
         final int fps;
         final FrameFeed feed;
+        final boolean fullClient;
         final Slot[] slots = {new Slot(), new Slot(), new Slot()};
         final AtomicLong issued = new AtomicLong();
         final AtomicLong maxReadbackNs = new AtomicLong(), maxHookNs = new AtomicLong();
         long nextIssue;
-        Session(long epoch, int fps) throws IOException {
+        Session(long epoch, int fps, boolean fullClient) throws IOException {
+            this.fullClient = fullClient;
             this.epoch = epoch; this.fps = fps; interval = 1_000_000_000L / fps; feed = new FrameFeed();
         }
     }
     @Override public synchronized JsonObject start(long epoch, int fps) {
+        return start(epoch, fps, false);
+    }
+    @Override public synchronized JsonObject start(long epoch, int fps, boolean fullClient) {
         if (fps < 1 || fps > 30) throw new IllegalArgumentException("FPS must be 1..30");
         if (active != null && !active.feed.closed()) throw new IllegalStateException("Stream already running");
         try {
-            Session next = new Session(epoch, fps);
+            Session next = new Session(epoch, fps, fullClient);
             JsonObject reply = next.feed.status();
             reply.addProperty("type", "stream-started");
             reply.addProperty("host", "127.0.0.1");
             reply.addProperty("port", next.feed.port());
             reply.addProperty("fps", fps);
             reply.addProperty("epoch", epoch);
+            reply.addProperty("fullClient", fullClient);
             active = next;
             return reply;
         } catch (IOException failed) { throw new IllegalStateException("Cannot open frame stream", failed); }
@@ -123,15 +130,19 @@ public final class FrameStream implements HostServer.StreamProvider {
             if (now < s.nextIssue) return;
             s.nextIssue = now + s.interval;
             Slot available = null;
-            for (Slot slot : s.slots) if (slot.fence == 0) { available = slot; break; }
+            for (Slot slot : s.slots) if (slot.fence == 0 && !slot.pendingColor) { available = slot; break; }
             if (available == null) { s.feed.drop(); return; }
-            issue(available, framebuffer, width, height);
+            issue(available, framebuffer, width, height, s.fullClient);
             available.capturedNanos = now;
             available.sequence = s.issued.incrementAndGet();
             available.metadata = FrameCapture.metadata(client, camera, fov, matrices, pose, s.epoch, width, height, now);
             available.metadata.addProperty("type", "world-stream-frame");
             available.metadata.addProperty("rowOrder", "bottom-to-top");
             available.metadata.addProperty("colorEncoding", "rgba8");
+            if (s.fullClient) {
+                available.metadata.addProperty("includesHandHud", true);
+                available.metadata.addProperty("layer", "client-color-world-depth");
+            }
         } catch (RuntimeException failed) {
             LOG.warn("Frame stream stopped", failed);
             s.feed.fail(failed.getMessage());
@@ -140,7 +151,7 @@ public final class FrameStream implements HostServer.StreamProvider {
             s.maxHookNs.accumulateAndGet(System.nanoTime() - started, Math::max);
         }
     }
-    private static void issue(Slot slot, Framebuffer framebuffer, int width, int height) {
+    private static void issue(Slot slot, Framebuffer framebuffer, int width, int height, boolean fullClient) {
         int previousFramebuffer = GL11.glGetInteger(GL30.GL_READ_FRAMEBUFFER_BINDING);
         int[] parameters = {GL11.GL_PACK_ALIGNMENT, GL11.GL_PACK_ROW_LENGTH, GL11.GL_PACK_SKIP_ROWS,
                 GL11.GL_PACK_SKIP_PIXELS, GL11.GL_PACK_SWAP_BYTES};
@@ -159,15 +170,53 @@ public final class FrameStream implements HostServer.StreamProvider {
             readBuffer = GL11.glGetInteger(GL11.GL_READ_BUFFER);
             GL11.glReadBuffer(GL30.GL_COLOR_ATTACHMENT0);
             for (int i = 0; i < parameters.length; i++) GL11.glPixelStorei(parameters[i], i == 0 ? 1 : 0);
-            GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, 0L);
+            if (!fullClient) GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, 0L);
             GL11.glReadPixels(0, 0, width, height, GL11.GL_DEPTH_COMPONENT, GL11.GL_FLOAT, (long) width * height * 4);
-            slot.fence = GL32.glFenceSync(GL32.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-            if (slot.fence == 0) throw new IllegalStateException("Cannot create GPU fence");
-            GL11.glFlush();
+            if (fullClient) slot.pendingColor = true;
+            else {
+                slot.fence = GL32.glFenceSync(GL32.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+                if (slot.fence == 0) throw new IllegalStateException("Cannot create GPU fence");
+                GL11.glFlush();
+            }
         } finally {
             if (readBuffer != -1) GL11.glReadBuffer(readBuffer);
             GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, previousFramebuffer);
             for (int i = 0; i < parameters.length; i++) GL11.glPixelStorei(parameters[i], previous[i]);
+        }
+    }
+    /** Final client color includes hand/HUD/GUI; depth remains the earlier world pass. */
+    public void afterClient(MinecraftClient client) {
+        Session s = rendered;
+        if (s == null || !s.fullClient) return;
+        RenderSystem.assertOnRenderThread();
+        int pack = GL11.glGetInteger(GL21.GL_PIXEL_PACK_BUFFER_BINDING);
+        int read = GL11.glGetInteger(GL30.GL_READ_FRAMEBUFFER_BINDING);
+        int alignment = GL11.glGetInteger(GL11.GL_PACK_ALIGNMENT), rows = GL11.glGetInteger(GL11.GL_PACK_ROW_LENGTH);
+        int skipRows = GL11.glGetInteger(GL11.GL_PACK_SKIP_ROWS), skipPixels = GL11.glGetInteger(GL11.GL_PACK_SKIP_PIXELS);
+        int readBuffer = -1;
+        try {
+            var fb = client.getFramebuffer();
+            GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, fb.fbo);
+            readBuffer = GL11.glGetInteger(GL11.GL_READ_BUFFER); GL11.glReadBuffer(GL30.GL_COLOR_ATTACHMENT0);
+            GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT,1); GL11.glPixelStorei(GL11.GL_PACK_ROW_LENGTH,0);
+            GL11.glPixelStorei(GL11.GL_PACK_SKIP_ROWS,0); GL11.glPixelStorei(GL11.GL_PACK_SKIP_PIXELS,0);
+            for (Slot slot : s.slots) if (slot.pendingColor) {
+                slot.pendingColor = false;
+                int w = slot.metadata.get("width").getAsInt(), h = slot.metadata.get("height").getAsInt();
+                if (w != fb.viewportWidth || h != fb.viewportHeight) { s.feed.drop(); continue; }
+                GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, slot.pbo);
+                GL11.glReadPixels(0,0,w,h,GL11.GL_RGBA,GL11.GL_UNSIGNED_BYTE,0L);
+                slot.metadata.addProperty("guiOpen", client.currentScreen != null);
+                slot.fence = GL32.glFenceSync(GL32.GL_SYNC_GPU_COMMANDS_COMPLETE,0);
+                if (slot.fence == 0) throw new IllegalStateException("Cannot create client frame fence");
+            }
+            GL11.glFlush();
+        } catch (RuntimeException failed) { s.feed.fail(failed.getMessage()); }
+        finally {
+            if (readBuffer != -1) GL11.glReadBuffer(readBuffer);
+            GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER,read); GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER,pack);
+            GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT,alignment); GL11.glPixelStorei(GL11.GL_PACK_ROW_LENGTH,rows);
+            GL11.glPixelStorei(GL11.GL_PACK_SKIP_ROWS,skipRows); GL11.glPixelStorei(GL11.GL_PACK_SKIP_PIXELS,skipPixels);
         }
     }
     private static void destroy(Session s) {

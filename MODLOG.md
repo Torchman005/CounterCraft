@@ -890,3 +890,32 @@ launch, in-game test, rendering bridge, or complete port has been performed.
 - Current host1680x1050/guest1280x720 aspect mismatch, draw64 identity under all
   game states, rejection cause/reconnect, continuous world depth pairing, latency,
   input/player/collision/chunk synchronization and playable fusion remain open.
+
+## Continuous input and full-client passthrough checkpoint (2026-10-08)
+
+- Latest immutable input mailbox, 250 ms expiry, world/session gating, tick-thread
+  vanilla movement/interaction/GUI calls. Full client color captures hand/HUD/GUI
+  but retains earlier world depth: explicitly labelled mixed layer, never fusion.
+- Keyboard, GUI click, mouse look and left mining verified in Steam offline CS2.
+  Main-window subclass/raw sink/low-level hook approaches did not deliver movement;
+  removed them. Cached ReShade cursor differences work, with stationary/warp/focus
+  guards. +/-100 pixel movement changes orientation +/-12 degrees, with no drift
+  during a 30-second stationary interval. GUI coordinates use client dimensions.
+- Creative GUI click picked oak_log; independent guest inventory read confirmed
+  cursorCount=1. Native left mining changed (27,128,-9) to air. Guest bow charged
+  30 ticks, release cleared item use and inputId. Full world/GUI verifier moved
+  3.255 blocks. CS2 R-key use placed oak_planks at (27,127,-9), confirmed by guest readback.
+  Mouse-right transport remains unresolved; R is the accepted alternative.
+- Added held vanilla key queries for mining/item use, remote rendered GUI pointer,
+  drag/modifiers, wheel, drop/swap/pick. Extra controls not yet individually accepted.
+- Python 41 tests, Java 27 tests and native 14 CTest suites pass; loader fixtures
+  29 passed before supervisor-specific changes. Full-client screenshots and retail
+  captures stay ignored. Teardown D3D11 reference warning still unexplained.
+- F8 returns to native Dust2 and suspends input; toggling back resumes MC view.
+  Supervised startup/restore now handles exit-process enumeration
+  and transient DLL locking races with bounded, hash-guarded retries. Three dedicated
+  fixtures pass (preview, failed Steam startup rollback, repeatable recovery);
+  three relevant loader guard/install/restore regressions also pass. Multiple actual
+  Steam sessions finished Restored with no restore failure.
+- World-depth fusion, host player/collision coupling, text input, aspect handling,
+  broad survival/entities/redstone acceptance and reproducible packaging remain open.

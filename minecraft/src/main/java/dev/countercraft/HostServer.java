@@ -13,6 +13,10 @@ public final class HostServer implements AutoCloseable {
     }
     public interface StreamProvider {
         JsonObject start(long epoch, int fps);
+        default JsonObject start(long epoch, int fps, boolean fullClient) {
+            if (fullClient) throw new IllegalArgumentException("Full-client stream unavailable");
+            return start(epoch, fps);
+        }
         JsonObject status();
         void stop();
     }
@@ -20,6 +24,7 @@ public final class HostServer implements AutoCloseable {
     private final CaptureProvider capture;
     private final StreamProvider stream;
     private final ActionQueue actions;
+    private final RemoteControl controls;
     private final ServerSocket listener;
     private volatile Socket active;
     private final Thread worker;
@@ -35,10 +40,14 @@ public final class HostServer implements AutoCloseable {
         this(state, port, capture, stream, null);
     }
     public HostServer(BridgeState state, int port, CaptureProvider capture, StreamProvider stream, ActionQueue actions) throws IOException {
+        this(state, port, capture, stream, actions, null);
+    }
+    public HostServer(BridgeState state, int port, CaptureProvider capture, StreamProvider stream, ActionQueue actions, RemoteControl controls) throws IOException {
         this.state = state;
         this.capture = capture;
         this.stream = stream;
         this.actions = actions;
+        this.controls = controls;
         listener = new ServerSocket();
         listener.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 1);
         worker = new Thread(this::run, "CounterCraft-Host");
@@ -59,6 +68,7 @@ public final class HostServer implements AutoCloseable {
             } finally {
                 state.release();
                 if (actions != null) actions.reset();
+                if (controls != null) controls.reset();
                 if (stream != null) stream.stop();
                 active = null;
             }
@@ -89,6 +99,7 @@ public final class HostServer implements AutoCloseable {
                     reply.addProperty("capture", capture != null);
                     reply.addProperty("stream", stream != null);
                     reply.addProperty("actions", actions != null);
+                    reply.addProperty("input", controls != null);
                 } else if (type.equals("status") || type.equals("ping")) {
                     BridgeState.World w = state.world();
                     reply.addProperty("type", "status");
@@ -100,6 +111,12 @@ public final class HostServer implements AutoCloseable {
                     reply.add("position", pos);
                     reply.addProperty("serverMonotonicNanos", System.nanoTime());
                     if (stream != null) reply.add("stream", stream.status());
+                    if (controls != null) reply.add("player", controls.player());
+                } else if (type.equals("input")) {
+                    if (controls == null) throw new IllegalArgumentException("No input provider");
+                    var accepted = controls.accept(m, state.world(), System.nanoTime());
+                    reply.addProperty("type", "input-ack"); reply.addProperty("id", accepted.id());
+                    reply.addProperty("epoch", accepted.epoch());
                 } else if (type.equals("action")) {
                     if (actions == null) throw new IllegalArgumentException("No action provider");
                     var pending = actions.submit(ActionQueue.parse(m), state.world(), System.nanoTime());
@@ -127,6 +144,7 @@ public final class HostServer implements AutoCloseable {
                 } else if (type.equals("release")) {
                     state.release();
                     if (actions != null) actions.clear("Host released control");
+                    if (controls != null) controls.release();
                     reply.addProperty("type", "released");
                 } else if (type.equals("stream-start")) {
                     BridgeState.World w = state.world();
@@ -134,7 +152,13 @@ public final class HostServer implements AutoCloseable {
                     if (stream == null || fps < 1 || fps > 30 || !w.offline()
                             || System.nanoTime() - w.time() > BridgeState.TIMEOUT_NS)
                         throw new IllegalArgumentException("Stream requires fresh singleplayer and fps 1..30");
-                    reply = stream.start(w.epoch(), (int) fps);
+                    boolean fullClient = false;
+                    if (m.has("fullClient")) {
+                        if (!m.get("fullClient").isJsonPrimitive() || !m.get("fullClient").getAsJsonPrimitive().isBoolean())
+                            throw new IllegalArgumentException("fullClient must be boolean");
+                        fullClient = m.get("fullClient").getAsBoolean();
+                    }
+                    reply = stream.start(w.epoch(), (int) fps, fullClient);
                 } else if (type.equals("stream-stop")) {
                     if (stream == null) throw new IllegalArgumentException("No frame stream provider");
                     stream.stop();
@@ -210,6 +234,7 @@ public final class HostServer implements AutoCloseable {
         if (socket != null) socket.close();
         state.release();
         if (actions != null) actions.reset();
+        if (controls != null) controls.reset();
         if (stream != null) stream.stop();
     }
 }

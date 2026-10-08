@@ -45,6 +45,9 @@ int main() {
         require(crc32(raw)==0xcbf43926,"IEEE CRC");require(crc32(raw.subspan(3),crc32(raw.first(3)))==crc32(raw),"Incremental CRC");
         auto j=metadata(); auto m=decode_metadata(j.dump(),h,7);require(m.height==2 && m.rotation[0]==90,"Metadata decode");
         rejects([&]{decode_metadata(j.dump(),h,8);});
+        auto full=j;full["includesHandHud"]=true;full["layer"]="client-color-world-depth";full["guiOpen"]=true;
+        const auto client=decode_metadata(full.dump(),h,7);require(client.full_client && client.gui_open,"Full client flags");
+        full["layer"]="world";rejects([&]{decode_metadata(full.dump(),h,7);});
         for(auto field:{"rowOrder","colorEncoding","depthSpace","type"}) {
             auto invalid=j;invalid[field]="wrong";rejects([&]{decode_metadata(invalid.dump(),h,7);});
         }

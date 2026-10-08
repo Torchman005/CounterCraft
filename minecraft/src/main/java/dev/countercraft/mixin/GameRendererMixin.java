@@ -19,6 +19,8 @@ public abstract class GameRendererMixin {
     @Shadow private double getFov(Camera camera, float tickDelta, boolean changingFov) { throw new AssertionError(); }
     @Inject(method = "render", at = @At("HEAD"))
     private void countercraft$frame(CallbackInfo ci) { BridgeClient.beginFrame(); }
+    @Inject(method = "render", at = @At("RETURN"))
+    private void countercraft$client(CallbackInfo ci) { BridgeClient.afterClient(); }
 
     @Redirect(method = "render", at = @At(value = "FIELD",
             target = "Lnet/minecraft/client/option/GameOptions;pauseOnLostFocus:Z"))

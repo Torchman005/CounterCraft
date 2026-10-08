@@ -22,9 +22,10 @@ CLOCK_OFFSET = 9_000_000_000_000
 PROBE = None
 
 
-def make_packet(sequence=1, *, age_ns=0, session=SESSION, depth=None, camera=None):
+def make_packet(sequence=1, *, age_ns=0, session=SESSION, depth=None, camera=None, full=False):
     base = copy.deepcopy(FrameReader(Bytes(packet()), SESSION, 7).read().metadata)
     base["monotonicNanos"] = time.perf_counter_ns() + CLOCK_OFFSET - age_ns
+    if full: base.update(includesHandHud=True,layer='client-color-world-depth',guiOpen=False)
     if camera is not None:
         base['requestedFrame']=camera['frame']
         base['camera']={key:camera[key] for key in ('position','rotation','fov')}
@@ -52,6 +53,7 @@ class Fixture:
         self.errors = []
         self.cameras = []
         self.releases = 0
+        self.inputs=[];self.full=False
         self.camera_arrived = threading.Event()
         self.control = self.listen()
         self.binary = self.listen()
@@ -76,7 +78,7 @@ class Fixture:
                 for line in reader:
                     message = json.loads(line)
                     kind = message["type"]
-                    if kind == "hello": response = {"type":"ready", "stream":True}
+                    if kind == "hello": response = {"type":"ready", "stream":True, "input":True}
                     elif kind == "ping":
                         pings += 1
                         response = {"type":"status", "serverMonotonicNanos":time.perf_counter_ns()+CLOCK_OFFSET,
@@ -84,10 +86,14 @@ class Fixture:
                         if self.scenario == "epoch" and pings > 6: response["epoch"] = 8
                         if self.scenario == "control-eof" and pings > 6: return
                     elif kind == "stream-start":
+                        self.full=message.get('fullClient',False)
                         response = {"type":"stream-started", "host":"127.0.0.1", "port":self.binary.getsockname()[1],
                                     "session":str(SESSION), "epoch":7}
                         t = threading.Thread(target=self.send_frames, daemon=True)
                         self.threads.append(t); t.start()
+                    elif kind == 'input':
+                        self.inputs.append(message)
+                        response=dict(type='input-ack',id=message['id']+(1 if self.scenario=='input-bad-ack' else 0),epoch=7)
                     elif kind == 'camera':
                         self.cameras.append(message)
                         self.camera_arrived.set()
@@ -114,7 +120,7 @@ class Fixture:
                 elif self.scenario == "blocked":
                     binary.sendall(b"CCF")  # Cancellation in the middle of a header.
                 else:
-                    data = make_packet()
+                    data = make_packet(full=self.full)
                     if self.scenario == "fragment":
                         for offset in range(0, len(data), 7):
                             binary.sendall(data[offset:offset+7])
@@ -142,6 +148,27 @@ class Fixture:
 
 
 class NativeSocketTests(unittest.TestCase):
+    def test_gameplay_input_and_expiry_release(self):
+        fixture=Fixture('valid');fixture.start()
+        try:
+            result=subprocess.run([str(PROBE),str(fixture.port),'.8','gameplay'],capture_output=True,text=True,timeout=5,check=True)
+            report=json.loads(result.stdout)
+            self.assertEqual(report['failure'],'')
+            self.assertGreater(report['inputsSent'],3)
+            self.assertEqual(report['received'],1)
+            self.assertEqual(fixture.inputs[0]['epoch'],7)
+            self.assertEqual(fixture.inputs[0]['forward'],1)
+            self.assertEqual(fixture.releases,1)
+        finally: fixture.close()
+
+    def test_gameplay_acknowledgement_mismatch_clears_frame(self):
+        fixture=Fixture('input-bad-ack');fixture.start()
+        try:
+            result=subprocess.run([str(PROBE),str(fixture.port),'.8','gameplay'],capture_output=True,text=True,timeout=5,check=True)
+            report=json.loads(result.stdout)
+            self.assertIn('input acknowledgement mismatch',report['failure'])
+            self.assertTrue(report['cleared'])
+        finally: fixture.close()
     def test_rendered_camera_is_checked_independently_of_ack(self):
         for scenario in ('render-camera','wrong-render-camera'):
             fixture=Fixture(scenario);fixture.start()

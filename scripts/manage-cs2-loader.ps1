@@ -25,7 +25,7 @@ if ($Mode -eq 'Preview') {
         SteamLaunch=[bool]$SteamLaunch; BootstrapTarget=if($SteamLaunch){$bootstrapTarget}else{$null} }
     return
 }
-if (Get-Process -Name cs2 -ErrorAction SilentlyContinue) { throw 'Close the existing CS2 process before changing its loader.' }
+if (Get-Process -Name cs2 -ErrorAction SilentlyContinue | Where-Object { -not $_.HasExited }) { throw 'Close the existing CS2 process before changing its loader.' }
 if (-not (Test-Path -LiteralPath (Join-Path $gameDirectory 'cs2.exe') -PathType Leaf)) { throw 'Missing CS2 executable.' }
 
 if ($Mode -eq 'Restore') {

@@ -101,7 +101,7 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(other.read_bytes(), b'Own test marker')
         self.assertEqual(self.target.read_bytes(), LOADER.read_bytes())
 
-    def preview_launch(self, probe=False, map_name='de_dust2', capture=False, camera=False):
+    def preview_launch(self, probe=False, map_name='de_dust2', capture=False, camera=False, gameplay=False):
         # Only invoke the launcher's default preview; never pass -Launch.
         def quote(value):
             return "'" + str(value).replace("'", "''") + "'"
@@ -111,9 +111,20 @@ class LoaderTests(unittest.TestCase):
             ' -Map ' + quote(map_name) + (' -HostProbe' if probe else '') +
             (' -DepthCapture' if capture else '') +
             (' -CameraRelay' if camera else '') +
+            (' -Gameplay' if gameplay else '') +
             ' | ConvertTo-Json -Depth 5\n', encoding='utf8')
         return subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File', str(script)],
             capture_output=True, text=True, encoding='utf8', errors='replace', timeout=15)
+
+    def test_gameplay_is_explicit_and_refuses_camera_relay(self):
+        self.command('Install','-SteamLaunch')
+        result=self.preview_launch(gameplay=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('-countercraft-gameplay',json.loads(result.stdout)['Arguments'])
+        self.assertNotIn('-countercraft-gameplay',json.loads(self.preview_launch().stdout)['Arguments'])
+        mixed=self.preview_launch(gameplay=True,camera=True)
+        self.assertNotEqual(mixed.returncode,0)
+        self.assertIn('do not combine',mixed.stderr)
 
     def test_camera_relay_requires_private_calibration_and_is_explicit(self):
         self.command('Install','-SteamLaunch')
@@ -360,6 +371,50 @@ INVOKE_LAUNCHER
         self.assertTrue(json.loads(result.stdout)['ProcessIdentityVerified'])
 
     # Fixtures remain under .local as failure evidence; no recursive cleanup/game changes.
+
+
+class PlaySupervisorTests(unittest.TestCase):
+    setUp = LoaderTests.setUp
+    write_backup = LoaderTests.write_backup
+    command = LoaderTests.command
+
+    def play(self, mode, error=None):
+        script = self.root / 'play-fixture.ps1'
+        script.write_text("$ErrorActionPreference='Stop'\n"
+            "function Get-Process { param($Name,$Id,$ErrorAction) }\n"
+            "function Get-CimInstance { param($ClassName,$Filter) }\n"
+            "function python { $global:LASTEXITCODE=0; '{\"ready\":true}' }\n"
+            "& " + ps_quote(ROOT / 'game/play.ps1') + " -Mode " + mode
+            + " -Cs2Root " + ps_quote(self.game_root) + " -SessionDirectory " + ps_quote(self.root)
+            + " -BackupSnapshot " + ps_quote(self.backup) + " -Loader " + ps_quote(LOADER)
+            + " | ConvertTo-Json -Depth 8\n", encoding='utf8')
+        result = subprocess.run([PWSH,'-NoLogo','-NoProfile','-File',str(script)],capture_output=True,
+            text=True,encoding='utf8',errors='replace',timeout=20)
+        if error:
+            self.assertNotEqual(result.returncode,0);self.assertIn(error,result.stderr)
+        else:
+            self.assertEqual(result.returncode,0,result.stderr)
+        return result
+
+    def test_preview_does_not_install_or_query_guest(self):
+        result=self.play('Preview')
+        self.assertFalse(json.loads(result.stdout)['GameFilesWritten'])
+        self.assertFalse(self.target.exists());self.assertFalse((self.root/'session.json').exists())
+
+    def test_failed_steam_start_restores_installed_files(self):
+        if not (ROOT/'.local/native-build/CounterCraftProbe.addon64').exists():
+            self.skipTest('Build native candidate first')
+        self.play('Play',error='Start the installed Steam client first')
+        self.assertFalse(self.target.exists());self.assertFalse((self.game/'ReShade.ini').exists())
+        receipt=json.loads((self.root/'session.json').read_text())
+        self.assertEqual(receipt['Mode'],'Restored');self.assertTrue(receipt['Failure'])
+
+    def test_recover_is_guarded_and_repeatable(self):
+        self.state=self.root/'loader-state.json'
+        self.command('Install','-SteamLaunch')
+        self.play('Recover');self.assertFalse(self.target.exists())
+        self.assertEqual(json.loads(self.state.read_text())['Mode'],'Restored')
+        self.assertEqual(json.loads(self.play('Recover').stdout)['Mode'],'AlreadyRestored')
 
 
 if __name__ == '__main__':

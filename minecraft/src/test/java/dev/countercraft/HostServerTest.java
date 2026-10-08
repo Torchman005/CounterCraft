@@ -242,4 +242,22 @@ class HostServerTest {
             assertNull(reader.readLine());
         }
     }
+    @Test void inputLifecycleBelongsToControlConnection() throws Exception {
+        var state = new BridgeState(); var controls = new RemoteControl();
+        try (HostServer server = new HostServer(state,0,null,null,null,controls)) {
+            try (Socket client = new Socket("127.0.0.1",server.port())) {
+                client.setSoTimeout(2000);
+                var reader = new BufferedReader(new InputStreamReader(client.getInputStream()));
+                send(client.getOutputStream(),"{\"v\":1,\"type\":\"hello\",\"role\":\"cs2\"}");
+                assertTrue(reply(reader).get("input").getAsBoolean());
+                state.update(new BridgeState.World(7,true,0,64,0,System.nanoTime()));
+                send(client.getOutputStream(),"{\"v\":1,\"type\":\"input\",\"id\":1,\"epoch\":7,\"yaw\":0,\"pitch\":0,\"forward\":1,\"sideways\":0,\"slot\":0}");
+                assertEquals("input-ack",reply(reader).get("type").getAsString());
+                assertNotNull(controls.live(state.world(),System.nanoTime()));
+                send(client.getOutputStream(),"{\"v\":1,\"type\":\"release\"}");
+                assertEquals("released",reply(reader).get("type").getAsString());
+                assertNull(controls.live(state.world(),System.nanoTime()));
+            }
+        }
+    }
 }

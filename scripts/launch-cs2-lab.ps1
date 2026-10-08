@@ -6,6 +6,7 @@ param(
     [switch]$HostProbe,
     [switch]$DepthCapture,
     [switch]$CameraRelay,
+    [switch]$Gameplay,
     [ValidateRange(40,180)][int]$StartupTimeoutSeconds=120,
     [switch]$Launch
 )
@@ -20,6 +21,10 @@ if ((Get-FileHash -LiteralPath $state.Target -Algorithm SHA256).Hash.ToLowerInva
 $launchArguments = @('-insecure','-countercraft-lab','-countercraft-preview','-console','+sv_lan','1','+map',$Map)
 if ($HostProbe -or $DepthCapture) { $launchArguments += '-countercraft-host-probe' }
 if ($DepthCapture) { $launchArguments += '-countercraft-depth-capture' }
+if ($Gameplay) {
+    if($CameraRelay){throw 'Gameplay owns the Minecraft camera; do not combine with CameraRelay.'}
+    $launchArguments += '-countercraft-gameplay'
+}
 if ($CameraRelay) {
     if (-not (Test-Path -LiteralPath (Join-Path $candidate 'camera-layout.json') -PathType Leaf)) {
         throw 'Camera relay requires a private calibration in the candidate directory.'

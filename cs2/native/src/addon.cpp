@@ -10,10 +10,14 @@
 #include <condition_variable>
 #include <memory>
 #include <unordered_map>
+#include <cmath>
+#include <algorithm>
+#include "mouse_input.hpp"
 
 namespace {
 namespace api = reshade::api;
 constexpr const char* effect = "CounterCraftProbe.fx";
+
 
 struct RuntimeTextures {
     api::device* device{};
@@ -58,7 +62,16 @@ struct AddonState {
     cc::HostProbe host_probe;
     cc::HostCapture host_capture;
     cc::HostCameraFeed camera_feed;
-    bool preview{};
+    bool preview{},gameplay{};
+    cc::MouseMotion sampled_mouse;
+    std::atomic<uint64_t> sampled_events{};
+    std::atomic<uint32_t> sampled_x{},sampled_y{};
+    bool input_enabled{true};
+    int64_t scroll_total{};
+    double yaw{},pitch{},cursor_x{.5},cursor_y{.5}; int selected_slot{};
+    bool view_seeded{};
+    std::atomic<uint64_t> input_frames{};
+    std::atomic<uint64_t> attack_frames{},use_frames{};
     std::mutex runtimes_mutex, report_mutex;
     std::unordered_map<api::effect_runtime*,RuntimeTextures> runtimes;
     std::atomic<uint64_t> uploads{}, failures{}, runtime_count{};
@@ -67,8 +80,8 @@ struct AddonState {
     bool ending{};
     std::thread reporter;
 
-    AddonState(bool p, bool probe, bool capture, bool camera, const std::filesystem::path& path)
-        : host_probe(probe), host_capture(capture,path), camera_feed(camera,path,receiver), preview(p) {}
+    AddonState(bool p, bool probe, bool capture, bool camera, bool play, const std::filesystem::path& path)
+        : receiver(37122,20,play), host_probe(probe), host_capture(capture,path), camera_feed(camera && !play,path,receiver), preview(p),gameplay(play) {}
     void log_report(bool final) {
         const auto status=receiver.stats();
         const auto start=std::chrono::steady_clock::now();
@@ -81,6 +94,12 @@ struct AddonState {
             {"hostDepthCapture",host_capture.report()},{"hostCameraFeed",camera_feed.report()},
             {"camerasSent",status.cameras_sent},{"cameraReleases",status.camera_releases},
             {"cameraFramesMatched",status.cameras_rendered}};
+        report["gameplay"]=gameplay;report["inputsSent"]=status.inputs_sent;report["reconnects"]=status.reconnects;
+        report["sampledMouseChanges"]=sampled_events.load();report["inputFrames"]=input_frames.load();
+        report["sampledCursor"]={sampled_x.load(),sampled_y.load()};
+        report["attackInputFrames"]=attack_frames.load();report["useInputFrames"]=use_frames.load();
+        report["guestEye"]=status.player_eye;report["guestRotation"]=status.player_rotation;report["guestGuiOpen"]=status.gui_open;
+        if(gameplay)report["guestPlayer"]=status.player_status;
         // Includes snapshot and JSON tree construction, excludes dump/disk logging.
         report["reportBuildUs"]=std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now()-start).count();
@@ -91,7 +110,7 @@ struct AddonState {
         try {
             std::unique_lock lock(report_mutex);
             auto next_report=std::chrono::steady_clock::now()+std::chrono::seconds(1);
-            const auto poll=std::chrono::milliseconds(host_probe.enabled()?2:1000);
+            const auto poll=std::chrono::milliseconds(host_probe.enabled()?2:gameplay?10:1000);
             while (!report_wake.wait_for(lock,poll,[&]{ return ending; })) {
                 lock.unlock();
                 host_probe.drain();
@@ -108,7 +127,7 @@ struct AddonState {
             // tail and log teardown state instead of losing the last interval.
             host_probe.drain();
             log_report(true);
-        } catch (...) { /* Never propagate an exception into the game. */ }
+        } catch (...) { /* Never propagate into the game. */ }
     }
     void stop() {
         { std::lock_guard lock(report_mutex); ending = true; }
@@ -123,11 +142,66 @@ struct AddonState {
 // ReShade 6.8 calls AddonUninit before FreeLibrary; normal cleanup is explicit there.
 AddonState* state = nullptr;
 
+void input_frame(api::effect_runtime* runtime) {
+    if(!state->gameplay)return;
+    auto window=static_cast<HWND>(runtime->get_hwnd());
+    if(GetForegroundWindow()!=window || !state->receiver.stats().connected) {state->sampled_mouse.reset();state->view_seeded=false;return;}
+    if(runtime->is_key_pressed(VK_F8)) {state->input_enabled=!state->input_enabled;state->sampled_mouse.reset();state->view_seeded=false;}
+    if(!state->input_enabled)return;
+    const auto frame=state->receiver.latest();
+    if(!frame)return;
+    if(!state->view_seeded){state->yaw=frame->metadata.rotation[0];state->pitch=frame->metadata.rotation[1];state->view_seeded=true;}
+    const bool gui=frame && frame->metadata.gui_open;
+    int dx=0,dy=0;
+    uint32_t px=0,py=0;int16_t wheel=0;runtime->get_mouse_cursor_position(&px,&py,&wheel);
+    RECT rect{};GetClientRect(window,&rect);POINT center{rect.right/2,rect.bottom/2};ClientToScreen(window,&center);
+    // ReShade starts with an uninitialized cached (0,0). Seed the first real
+    // position instead of treating focus acquisition as a huge mouse movement.
+    const auto sample=(px || py)?state->sampled_mouse.update(int(px),int(py),center.x,center.y):std::pair<int,int>{0,0};
+    state->sampled_x=px;state->sampled_y=py;
+    dx=sample.first;dy=sample.second;
+    if(sample.first || sample.second)++state->sampled_events;
+    if(!gui) {state->yaw=std::remainder(state->yaw+dx*.12,360.0);state->pitch=std::clamp(state->pitch+dy*.12,-90.0,90.0);}
+    cc::Receiver::Input input;
+    input.yaw=state->yaw;input.pitch=state->pitch;input.captured_ns=cc::monotonic_ns();
+    input.forward=double(runtime->is_key_down('W'))-double(runtime->is_key_down('S'));
+    input.sideways=double(runtime->is_key_down('A'))-double(runtime->is_key_down('D'));
+    input.jump=runtime->is_key_down(VK_SPACE);input.sneak=runtime->is_key_down(VK_SHIFT);input.sprint=runtime->is_key_down(VK_CONTROL);
+    // Some host input modes do not populate ReShade's right-button cache.
+    // Read held physical state only after the exact foreground-window guard.
+    input.attack=runtime->is_mouse_button_down(0) || (GetAsyncKeyState(VK_LBUTTON)&0x8000)!=0;
+    input.use=runtime->is_key_down('R') || runtime->is_mouse_button_down(2) || (GetAsyncKeyState(VK_RBUTTON)&0x8000)!=0;
+    if(input.attack)++state->attack_frames;if(input.use)++state->use_frames;
+    input.inventory=runtime->is_key_down('E');input.escape=runtime->is_key_down(VK_ESCAPE);
+    input.drop=runtime->is_key_down('Q');input.swap=runtime->is_key_down('F');
+    input.pick=runtime->is_mouse_button_down(1) || (GetAsyncKeyState(VK_MBUTTON)&0x8000)!=0;
+    const int steps=std::abs(wheel)>=120?wheel/120:wheel;
+    if(steps) {state->scroll_total=std::clamp<int64_t>(state->scroll_total+steps,-1'000'000,1'000'000);
+        if(!gui)state->selected_slot=((state->selected_slot-steps)%9+9)%9;}
+    input.scroll=state->scroll_total;
+    for(int n=0;n<9;++n)if(runtime->is_key_pressed('1'+n))state->selected_slot=n;
+    input.slot=state->selected_slot;
+    if(gui && rect.right>0 && rect.bottom>0) {
+        state->cursor_x=std::clamp(state->cursor_x+double(dx)/rect.right,0.,1.);
+        state->cursor_y=std::clamp(state->cursor_y+double(dy)/rect.bottom,0.,1.);
+    }
+    input.mouse_x=state->cursor_x;input.mouse_y=state->cursor_y;
+    state->receiver.submit_input(input);
+    ++state->input_frames;
+    const auto pointer=runtime->find_uniform_variable(effect,"CCCursor");
+    const auto showing=runtime->find_uniform_variable(effect,"CCGui");
+    if(pointer.handle)runtime->set_uniform_value_float(pointer,float(state->cursor_x),float(state->cursor_y));
+    if(showing.handle)runtime->set_uniform_value_bool(showing,gui);
+    runtime->block_input_next_frame();
+}
+
 void active(api::effect_runtime* runtime, bool enabled, uint32_t w=0, uint32_t h=0) {
     const auto toggle = runtime->find_uniform_variable(effect,"CCActive");
     if (toggle.handle) runtime->set_uniform_value_bool(toggle,enabled);
     const auto size = runtime->find_uniform_variable(effect,"CCSize");
     if (size.handle) runtime->set_uniform_value_float(size,float(w),float(h));
+    const auto full=runtime->find_uniform_variable(effect,"CCFullClient");
+    if(full.handle)runtime->set_uniform_value_bool(full,state->gameplay);
 }
 
 void init_runtime(api::effect_runtime* runtime) {
@@ -166,6 +240,7 @@ void begin_effects(api::effect_runtime* runtime, api::command_list* commands,
                    api::resource_view, api::resource_view) {
     if (!state) return;
     try {
+        input_frame(runtime);
         std::lock_guard lock(state->runtimes_mutex);
         const auto found = state->runtimes.find(runtime);
         if (found == state->runtimes.end()) { active(runtime,false); return; }
@@ -194,7 +269,7 @@ void begin_effects(api::effect_runtime* runtime, api::command_list* commands,
             ++state->uploads; state->width.store(w); state->height.store(h);
         }
         textures.bind(runtime); // Also refresh semantic bindings after an effect reload.
-        active(runtime,state->preview,w,h);
+        active(runtime,state->preview && (!state->gameplay || state->input_enabled),w,h);
     } catch (...) {
         ++state->failures;
         try { active(runtime,false); } catch (...) {}
@@ -225,6 +300,7 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon, HMODULE reshade_m
         state = new AddonState(cc::has_argument(arguments,L"-countercraft-preview"),
             capture || cc::has_argument(arguments,L"-countercraft-host-probe"),capture,
             cc::has_argument(arguments,L"-countercraft-camera-relay"),
+            cc::has_argument(arguments,L"-countercraft-gameplay"),
             std::filesystem::path(module_path).parent_path());
         reshade::register_event<reshade::addon_event::init_effect_runtime>(init_runtime);
         reshade::register_event<reshade::addon_event::destroy_effect_runtime>(destroy_runtime);

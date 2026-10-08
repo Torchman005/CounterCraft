@@ -92,8 +92,15 @@ Metadata decode_metadata(const std::string& text, const Header& h, int64_t epoch
         || j.at("rowOrder") != "bottom-to-top" || j.at("colorEncoding") != "rgba8"
         || j.at("depthEncoding") != "float32-le" || j.at("depthSpace") != "opengl-window-z")
         throw std::runtime_error("Unexpected frame metadata");
-    flag(j,"reversedZ",false); flag(j,"includesHandHud",false); flag(j,"includesSkyFog",true);
+    flag(j,"reversedZ",false); flag(j,"includesSkyFog",true);
     Metadata m;
+    if (!j.at("includesHandHud").is_boolean()) throw std::runtime_error("Invalid client layer flag");
+    m.full_client = j.at("includesHandHud").get<bool>();
+    if (m.full_client) {
+        if (j.value("layer",std::string{})!="client-color-world-depth" || !j.at("guiOpen").is_boolean())
+            throw std::runtime_error("Invalid full-client layer");
+        m.gui_open=j.at("guiOpen").get<bool>();
+    }
     int64_t width = integer(j,"width"), height = integer(j,"height");
     if (width < 1 || height < 1 || width > max_pixels || height > max_pixels
         || uint64_t(width) * uint64_t(height) * 4 != h.color_bytes) throw std::runtime_error("Invalid frame dimensions");

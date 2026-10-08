@@ -1,8 +1,7 @@
 # Offline Minecraft actions
 
 The Fabric host advertises `actions: true` in `ready`. Requests run on the
-Minecraft client tick thread, never on the socket worker. CS2 input routing is
-not connected yet. After `hello`, read `status.epoch`, then send:
+Minecraft client tick thread, never on the socket worker. CS2 gameplay mode uses a separate held-input protocol (see gameplay-input.md). After `hello`, read `status.epoch`, then send:
 
 ```json
 {"v":1,"type":"action","id":1,"epoch":1,"action":"look","yaw":90,"pitch":20}

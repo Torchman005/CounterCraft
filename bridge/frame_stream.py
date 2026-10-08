@@ -108,12 +108,14 @@ class FrameReader:
     def _validate(self, m, color_size):
         expected = {"v": 1, "type": "world-stream-frame", "epoch": self.epoch,
                     "rowOrder": "bottom-to-top", "colorEncoding": "rgba8", "depthEncoding": "float32-le",
-                    "depthSpace": "opengl-window-z", "reversedZ": False, "includesHandHud": False,
+                    "depthSpace": "opengl-window-z", "reversedZ": False,
                     "includesSkyFog": True}
         if not isinstance(m, dict) or any(m.get(k) != v for k, v in expected.items()):
             raise ValueError("Wrong stream metadata or world epoch")
         if any(type(m.get(k)) is not bool for k in ("reversedZ", "includesHandHud", "includesSkyFog")):
             raise ValueError("Invalid stream flags")
+        if m["includesHandHud"] and (m.get("layer") != "client-color-world-depth" or type(m.get("guiOpen")) is not bool):
+            raise ValueError("Invalid full-client layer")
         if any(type(m.get(k)) is not int for k in ("v", "epoch", "width", "height", "requestedFrame",
                                                   "monotonicNanos", "readbackNanos")):
             raise ValueError("Invalid stream integer field")

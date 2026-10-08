@@ -20,6 +20,7 @@ struct Header {
 };
 struct Metadata {
     int width{}, height{};
+    bool full_client{}, gui_open{};
     int64_t epoch{}, requested_frame{}, captured_ns{}, readback_ns{};
     double near_plane{}, far_plane{}, fov{};
     std::array<double, 3> position{}, rotation{};

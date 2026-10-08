@@ -7,6 +7,9 @@ texture GuestDepth : COUNTERCRAFT_DEPTH;
 sampler GuestDepthSampler { Texture = GuestDepth; MinFilter = POINT; MagFilter = POINT; };
 uniform bool CCActive = false;
 uniform float2 CCSize = float2(0, 0);
+uniform bool CCFullClient = false;
+uniform bool CCGui = false;
+uniform float2 CCCursor = float2(.5,.5);
 
 void ProbeVS(uint id : SV_VertexID, out float4 position : SV_Position, out float2 uv : TEXCOORD) {
     uv = float2((id << 1) & 2, id & 2);
@@ -15,6 +18,12 @@ void ProbeVS(uint id : SV_VertexID, out float4 position : SV_Position, out float
 float4 ProbePS(float4 position : SV_Position, float2 uv : TEXCOORD) : SV_Target {
     float4 host = tex2D(HostSampler, uv);
     if (!CCActive || any(CCSize <= 0)) return host;
+    if (CCFullClient) {
+        float4 color = tex2D(GuestSampler, float2(uv.x,1-uv.y));
+        float2 cursor = abs((uv-CCCursor)*CCSize);
+        if(CCGui && ((cursor.x<1.5 && cursor.y<7) || (cursor.y<1.5 && cursor.x<7)))return float4(1,1,1,1);
+        return color;
+    }
     float2 inset = (uv - float2(0.69, 0.04)) / float2(0.28, 0.28);
     if (any(inset < 0) || any(inset > 1)) return host;
     if (any(inset < 0.015) || any(inset > 0.985)) return float4(1, 0.1, 0.1, 1);
