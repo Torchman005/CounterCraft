@@ -3,6 +3,7 @@
 #include "camera_readback.hpp"
 #include "camera_gpu.hpp"
 #include "depth_sampler.hpp"
+#include "depth_coverage.hpp"
 #include "receiver.hpp"
 #include <fstream>
 #include <mutex>
@@ -14,20 +15,25 @@ namespace api=reshade::api;
 using Microsoft::WRL::ComPtr;
 struct WorldFusion::Impl {
     struct Candidate {uint64_t draws{};bool cleared{};};
+    struct Transition {std::array<double,6> viewport{};uint32_t rejection{};bool latched{};};
     struct Device {
         uint32_t width{},height{};
         uint64_t bound{},current_sequence{};
         bool effects{},available{};
         bool late_clear{},output_late_clear{};
+        uint32_t coverage_captures{};
         WorldBoundary boundary;
         std::unordered_map<uint64_t,Candidate> candidates;
         std::unordered_map<uint64_t,bool> pending;
         std::unique_ptr<CameraReadback> cameras;
         std::unique_ptr<CameraGpu> matrices;
         std::unique_ptr<DepthSampler> world,final;
+        std::unique_ptr<DepthCoverage> coverage;
         ComPtr<ID3D11ShaderResourceView> world_view,final_view;
         std::optional<HostCamera> camera;
         std::array<double,6> output_viewport{};
+        std::array<Transition,16> transitions{};
+        size_t transition_count{};
     };
     bool enabled{},installed{};
     CameraLayout layout;
@@ -38,6 +44,8 @@ struct WorldFusion::Impl {
     std::atomic<uint64_t> sequence{},snapshots{},boundaries{},paired{},gpu_pairs{},shown{},unaligned{},not_ready{},invalid{};
     std::string error;
     uint32_t last_rejection{};
+    std::array<Transition,16> last_transitions{};
+    size_t last_transition_count{};
     Impl(bool e,const std::filesystem::path& base,Receiver& r):enabled(e),receiver(r) {
         if(!enabled)return;
         auto read=[&](const char* name){auto path=base/name;
@@ -61,6 +69,7 @@ bool eligible(api::device* device,api::resource resource,const WorldFusion::Impl
         && uint64_t(d.width)*d.height<=max_pixels && desc.texture.depth_or_layers==1 && desc.texture.levels==1
         && desc.texture.samples<=8 && (desc.usage & api::resource_usage::depth_stencil)!=api::resource_usage::undefined;
 }
+void capture_coverage(WorldFusion::Impl::Device&,ID3D11DeviceContext*,ID3D11Texture2D*,float);
 void bind_depth(api::command_list* cmd,uint32_t,const api::resource_view*,api::resource_view view) {
     if(!immediate(cmd))return;
     std::lock_guard lock(fusion->mutex);
@@ -82,11 +91,15 @@ bool clear_depth(api::command_list* cmd,api::resource_view view,const float* dep
         const auto resource=device->get_resource_from_view(view);
         if(!eligible(device,resource,d))return false;
         const bool known_clear=count==0 && *depth==fusion->policy.clear;
-        if(d.boundary.latched && d.boundary.resource==resource.handle && known_clear)d.late_clear=true;
+        if(d.boundary.ready() && d.boundary.resource==resource.handle && known_clear){
+            // The event precedes the clear: preserve weapon/later writes now.
+            capture_coverage(d,immediate(cmd),reinterpret_cast<ID3D11Texture2D*>(resource.handle),fusion->policy.clear);
+            d.late_clear=true;
+        }
         d.boundary.clear_resource(resource.handle,known_clear);
         if(!d.candidates.contains(resource.handle) && d.candidates.size()>=16)return false;
         d.candidates[resource.handle].cleared=count==0 && *depth==fusion->policy.clear;
-    }catch(...){++fusion->invalid;}
+    }catch(...){auto& d=fusion->devices[cmd->get_device()];d.boundary.invalid=true;++fusion->invalid;}
     return false;
 }
 ComPtr<ID3D11Texture2D> current_depth(ID3D11DeviceContext* context,uint64_t expected) {
@@ -106,6 +119,14 @@ void sample(DepthSampler& sampler,ID3D11DeviceContext* context,ID3D11Texture2D* 
         if(FAILED(device->CreateShaderResourceView(sampler.output(),nullptr,&view)))throw std::runtime_error("Fusion owned depth SRV failed");
     }
 }
+void capture_coverage(WorldFusion::Impl::Device& d,ID3D11DeviceContext* context,ID3D11Texture2D* source,float clear){
+    if(!d.coverage || !d.world)throw std::runtime_error("Missing world coverage baseline");
+    if(++d.coverage_captures>8)throw std::runtime_error("Too many post-world depth captures");
+    ComPtr<ID3D11Device> device;context->GetDevice(&device);
+    if(!d.final)d.final=std::make_unique<DepthSampler>(device.Get());
+    sample(*d.final,context,source,d.final_view);
+    d.coverage->accumulate(context,d.world->output(),d.final->output(),d.late_clear,clear);
+}
 bool draw(api::command_list* cmd,uint32_t,uint32_t,uint32_t,uint32_t) {
     auto* context=immediate(cmd);if(!context)return false;
     std::lock_guard lock(fusion->mutex);
@@ -118,11 +139,13 @@ bool draw(api::command_list* cmd,uint32_t,uint32_t,uint32_t,uint32_t) {
         if(!description.DepthEnable || description.DepthWriteMask!=D3D11_DEPTH_WRITE_MASK_ALL)return false;
         UINT count=16;std::array<D3D11_VIEWPORT,16> v{};context->RSGetViewports(&count,v.data());
         if(count!=1 || v[0].TopLeftX!=0 || v[0].TopLeftY!=0 || v[0].Width!=float(d.width) || v[0].Height!=float(d.height)) {
-            // Later small viewports (HUD/shadows) cannot redefine a world
-            // snapshot. Final-depth comparison still protects their depth writes.
+            // Post-world coverage includes writes from smaller viewports too.
             if(d.boundary.armed && !d.boundary.latched){d.boundary.invalid=true;d.boundary.rejection=4;}return false;
         }
         const auto& vp=v[0];const std::array<double,6> viewport{vp.TopLeftX,vp.TopLeftY,vp.Width,vp.Height,vp.MinDepth,vp.MaxDepth};
+        if(d.boundary.armed && d.transition_count<d.transitions.size()
+            && (!d.transition_count || d.transitions[d.transition_count-1].viewport!=viewport))
+            d.transitions[d.transition_count++]={viewport,d.boundary.rejection,d.boundary.latched};
         auto& candidate=d.candidates[d.bound];++candidate.draws;
         if(!d.boundary.armed && !d.boundary.invalid && candidate.cleared && candidate.draws==fusion->policy.camera_draw
             && vp.MinDepth==fusion->policy.world[0] && vp.MaxDepth==fusion->policy.world[1]) {
@@ -138,7 +161,9 @@ bool draw(api::command_list* cmd,uint32_t,uint32_t,uint32_t,uint32_t) {
             auto source=current_depth(context,d.bound);
             ComPtr<ID3D11Device> device;context->GetDevice(&device);
             if(!d.world)d.world=std::make_unique<DepthSampler>(device.Get());
-            sample(*d.world,context,source.Get(),d.world_view);++fusion->boundaries;
+            sample(*d.world,context,source.Get(),d.world_view);
+            if(!d.coverage)d.coverage=std::make_unique<DepthCoverage>(device.Get());
+            d.coverage->reset(context,d.world->output());++fusion->boundaries;
         }
     }catch(const std::exception& e) {
         auto& d=fusion->devices[cmd->get_device()];d.boundary.invalid=true;++fusion->invalid;fusion->error=std::string(e.what()).substr(0,160);
@@ -209,6 +234,9 @@ void WorldFusion::begin(api::effect_runtime* runtime,api::command_list* cmd) {
         if(!context)throw std::runtime_error("Fusion requires an immediate D3D11 context");
         if(d.current_sequence)d.pending[d.current_sequence]=d.boundary.ready();
         if(d.boundary.invalid)impl_->last_rejection=d.boundary.rejection;
+        if(d.boundary.armed) {
+            impl_->last_transitions=d.transitions;impl_->last_transition_count=d.transition_count;
+        }
         d.output_viewport=d.boundary.viewport;
         d.output_late_clear=d.late_clear;
         d.available=d.boundary.ready() && bool(d.matrices) && bool(d.world_view);
@@ -226,16 +254,14 @@ void WorldFusion::begin(api::effect_runtime* runtime,api::command_list* cmd) {
             // Only an observed public resource handle, invalidated by its destroy
             // callback. We keep no host COM reference between callbacks.
             auto* source=reinterpret_cast<ID3D11Texture2D*>(d.boundary.resource);
-            ComPtr<ID3D11Device> device;context->GetDevice(&device);
-            if(!d.final)d.final=std::make_unique<DepthSampler>(device.Get());
-            sample(*d.final,context,source,d.final_view);
+            capture_coverage(d,context,source,impl_->policy.clear);
         }else ++impl_->not_ready;
-        impl_->error.clear();
     }catch(const std::exception& e){d.available=false;++impl_->invalid;impl_->error=std::string(e.what()).substr(0,160);}
-    d.boundary.reset();d.bound=0;d.current_sequence=0;d.late_clear=false;
+    d.boundary.reset();d.bound=0;d.current_sequence=0;d.late_clear=false;d.coverage_captures=0;
+    d.transition_count=0;
     for(auto& [_,candidate]:d.candidates)candidate={};
     uint32_t width{},height{};runtime->get_screenshot_width_and_height(&width,&height);
-    if(d.width!=width || d.height!=height){d.available=false;d.candidates.clear();d.pending.clear();d.cameras.reset();d.matrices.reset();d.world_view.Reset();d.final_view.Reset();d.world.reset();d.final.reset();}
+    if(d.width!=width || d.height!=height){d.available=false;d.candidates.clear();d.pending.clear();d.cameras.reset();d.matrices.reset();d.world_view.Reset();d.final_view.Reset();d.world.reset();d.final.reset();d.coverage.reset();}
     d.width=width;d.height=height;
 }
 void WorldFusion::release(api::effect_runtime* runtime) {
@@ -243,13 +269,14 @@ void WorldFusion::release(api::effect_runtime* runtime) {
     runtime->update_texture_bindings("COUNTERCRAFT_HOST_WORLD",{},{});
     runtime->update_texture_bindings("COUNTERCRAFT_HOST_FINAL",{},{});
     runtime->update_texture_bindings("COUNTERCRAFT_HOST_CAMERA",{},{});
+    runtime->update_texture_bindings("COUNTERCRAFT_HOST_COVERAGE",{},{});
 }
 bool WorldFusion::bind(api::effect_runtime* runtime,const Frame& frame) {
     if(!impl_->enabled)return false;
     std::lock_guard lock(impl_->mutex);const auto found=impl_->devices.find(runtime->get_device());
     if(found==impl_->devices.end())return false;
     auto& d=found->second;
-    if(!d.available || !d.matrices || !d.world_view || !d.final_view){release(runtime);return false;}
+    if(!d.available || !d.matrices || !d.world_view || !d.final_view || !d.coverage){release(runtime);return false;}
     if(!frame.relayed_camera || !fusion_aligned(frame,*frame.relayed_camera) || frame.relayed_camera->viewport!=d.output_viewport) {
         ++impl_->unaligned;release(runtime);return false;
     }
@@ -277,15 +304,21 @@ bool WorldFusion::bind(api::effect_runtime* runtime,const Frame& frame) {
     runtime->update_texture_bindings("COUNTERCRAFT_HOST_FINAL",final,final);
     const api::resource_view matrices{reinterpret_cast<uint64_t>(d.matrices->view())};
     runtime->update_texture_bindings("COUNTERCRAFT_HOST_CAMERA",matrices,matrices);
+    const api::resource_view coverage{reinterpret_cast<uint64_t>(d.coverage->view())};
+    runtime->update_texture_bindings("COUNTERCRAFT_HOST_COVERAGE",coverage,coverage);
     ++impl_->shown;return true;
 }
 nlohmann::json WorldFusion::report()const {
     if(!impl_->enabled)return {{"enabled",false}};
     std::lock_guard lock(impl_->mutex);
+    auto transitions=nlohmann::json::array();
+    for(size_t i=0;i<impl_->last_transition_count;++i){const auto& t=impl_->last_transitions[i];
+        transitions.push_back({{"viewport",t.viewport},{"rejection",t.rejection},{"latched",t.latched}});}
     return {{"enabled",true},{"mode","static-pose-world-fusion"},{"cameraSnapshots",impl_->snapshots.load()},
         {"worldBoundaries",impl_->boundaries.load()},{"sameFrameCpuPairs",impl_->paired.load()},
         {"sameFrameGpuPairs",impl_->gpu_pairs.load()},{"effectEligibleFrames",impl_->shown.load()},
         {"poseMismatchFrames",impl_->unaligned.load()},{"notReadyFrames",impl_->not_ready.load()},{"invalid",impl_->invalid.load()},
-        {"lastError",impl_->error},{"lastBoundaryRejection",impl_->last_rejection},{"liveOcclusionVerified",false}};
+        {"lastError",impl_->error},{"lastBoundaryRejection",impl_->last_rejection},
+        {"lastViewportTransitions",transitions},{"liveOcclusionVerified",false}};
 }
 }

@@ -13,6 +13,8 @@ texture HostWorldDepth : COUNTERCRAFT_HOST_WORLD;
 sampler HostWorldSampler { Texture = HostWorldDepth; MinFilter = POINT; MagFilter = POINT; };
 texture HostFinalDepth : COUNTERCRAFT_HOST_FINAL;
 sampler HostFinalSampler { Texture = HostFinalDepth; MinFilter = POINT; MagFilter = POINT; };
+texture HostCoverage : COUNTERCRAFT_HOST_COVERAGE;
+sampler HostCoverageSampler { Texture = HostCoverage; MinFilter = POINT; MagFilter = POINT; };
 uniform bool CCFusion = false;
 uniform bool CCWorldFusion = false;
 texture HostCamera : COUNTERCRAFT_HOST_CAMERA;
@@ -54,7 +56,7 @@ float4 ProbePS(float4 position : SV_Position, float2 uv : TEXCOORD) : SV_Target 
         if(any(guestUV<0) || any(guestUV>1))return host;
         guestUV.y=1-guestUV.y;
         float guestZ=tex2D(GuestDepthSampler,guestUV).r;
-        return CCGuestVisible(world,finalDepth,guestZ,CCGuestPlanes,CCHostProjection,CCHostRange,CCHostReversed,CCAllowFinalClear)
+        return CCGuestVisible(world,finalDepth,guestZ,CCGuestPlanes,CCHostProjection,CCHostRange,CCHostReversed,CCAllowFinalClear,tex2D(HostCoverageSampler,uv).r)
             ?tex2D(GuestSampler,guestUV):host;
     }
     if(CCWorldFusion)return host;

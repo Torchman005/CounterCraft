@@ -10,14 +10,14 @@ int main(){try {
     std::ifstream input(CC_FUSION_SOURCE);std::stringstream source;source<<input.rdbuf();
     if(source.str().empty())throw std::runtime_error("Missing actual effect include");
     source<<R"HLSL(
-cbuffer Cases : register(b0){float4 cases[138];}
+cbuffer Cases : register(b0){float4 cases[156];}
 float4 vs(uint id:SV_VertexID):SV_Position {
     float2 uv=float2((id<<1)&2,id&2);return float4(uv*float2(2,-2)+float2(-1,1),0,1);
 }
 float4 ps(float4 p:SV_Position):SV_Target {
     uint i=uint(p.x)*6;
     if(uint(p.x)>=16 && uint(p.x)<20)return CCMatrixMatches(cases[i],cases[i+1],int(cases[i+2].x))?float4(1,0,0,1):float4(0,0,1,1);
-    bool visible=CCGuestVisible(cases[i].xy,cases[i].zw,cases[i+1].x,cases[i+2],cases[i+3],cases[i+4],cases[i+5].x!=0,cases[i+5].y!=0);
+    bool visible=CCGuestVisible(cases[i].xy,cases[i].zw,cases[i+1].x,cases[i+2],cases[i+3],cases[i+4],cases[i+5].x!=0,cases[i+5].y!=0,cases[i+5].z);
     return visible?float4(1,0,0,1):float4(0,0,1,1);
 })HLSL";
     const auto code=source.str();auto compile=[&](const char* entry,const char* profile) {
@@ -30,7 +30,7 @@ float4 ps(float4 p:SV_Position):SV_Target {
     ComPtr<ID3D11VertexShader> vs;ComPtr<ID3D11PixelShader> ps;
     check(device->CreateVertexShader(v->GetBufferPointer(),v->GetBufferSize(),nullptr,&vs),"Fusion VS");
     check(device->CreatePixelShader(p->GetBufferPointer(),p->GetBufferSize(),nullptr,&ps),"Fusion PS");
-    std::array<std::array<float,4>,138> data{};std::array<bool,23> expected{};
+    std::array<std::array<float,4>,156> data{};std::array<bool,26> expected{};
     // Guest n=1,f=9: depth .5625 is exactly two blocks. Host n=32,f=288:
     // depth .75 is exactly three blocks; .375 is one and a half blocks.
     for(size_t i=0;i<16;++i) {
@@ -62,11 +62,15 @@ float4 ps(float4 p:SV_Position):SV_Target {
     data[20*6]={.75f,.75f,1,1};data[20*6+5][1]=1;expected[20]=true;
     data[21*6]={.375f,.375f,1,1};data[21*6+5][1]=1;expected[21]=false;
     data[22*6]={.75f,.75f,1,1};expected[22]=false;
+    for(size_t i=23;i<26;++i)for(size_t r=0;r<6;++r)data[i*6+r]=data[r];
+    data[23*6]={.75f,.75f,1,1};data[23*6+5]={0,1,1,0};expected[23]=false; // weapon survived clear
+    data[24*6+5][2]=1;expected[24]=false; // later write restored to original depth
+    data[25*6+5][2]=std::numeric_limits<float>::quiet_NaN();expected[25]=false;
     D3D11_BUFFER_DESC desc{};desc.ByteWidth=sizeof(data);desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     D3D11_SUBRESOURCE_DATA initial{data.data(),0,0};ComPtr<ID3D11Buffer> buffer;
     check(device->CreateBuffer(&desc,&initial,&buffer),"Fusion oracle cases");auto* b=buffer.Get();context->PSSetConstantBuffers(0,1,&b);
-    auto target=texture(device.Get(),23,1,DXGI_FORMAT_R8G8B8A8_UNORM,nullptr,true);auto* rtv=target.rtv.Get();
-    context->OMSetRenderTargets(1,&rtv,nullptr);D3D11_VIEWPORT viewport{0,0,23,1,0,1};context->RSSetViewports(1,&viewport);
+    auto target=texture(device.Get(),26,1,DXGI_FORMAT_R8G8B8A8_UNORM,nullptr,true);auto* rtv=target.rtv.Get();
+    context->OMSetRenderTargets(1,&rtv,nullptr);D3D11_VIEWPORT viewport{0,0,26,1,0,1};context->RSSetViewports(1,&viewport);
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);context->VSSetShader(vs.Get(),nullptr,0);context->PSSetShader(ps.Get(),nullptr,0);context->Draw(3,0);
     context->OMSetRenderTargets(0,nullptr,nullptr);const auto rgba=read_rgba(device.Get(),context.Get(),target.texture.Get());
     for(size_t i=0;i<expected.size();++i)if((rgba[i*4]==255)!=expected[i] || rgba[i*4+2]!=(expected[i]?0:255))throw std::runtime_error("Fusion GPU case "+std::to_string(i)+" failed");
@@ -74,5 +78,5 @@ float4 ps(float4 p:SV_Position):SV_Target {
     Frame mixed;mixed.metadata.full_client=true;Compositor compositor(device.Get(),context.Get());
     bool refused=false;try{compositor.upload(mixed);}catch(const std::exception&){refused=true;}
     if(!refused)throw std::runtime_error("Mixed client layer admitted");
-    std::cout<<"Actual world effect GPU: 23 occlusion, camera and observed late-clear cases passed\n";return 0;
+    std::cout<<"Actual world effect GPU: 26 occlusion, camera and retained coverage cases passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

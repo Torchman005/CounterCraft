@@ -168,3 +168,11 @@ Use the reviewed temporary loader workflow and backup/restore scripts for each
 test session after the reinstall is complete and its new state is reviewed.
 The independent cube test and ReShade/GTA reference are not a verified CS2 adapter.
 GPU sharing, input/event routing and player/chunk/collision sync remain later work.
+
+The 2026-10-09 retained-coverage stage protects observed post-world depth changes
+across known full clears and passes 19 native suites. Live world snapshots now
+survive viewport changes but still reject a later different depth resource;
+camera relay/effect eligibility remain zero. Steam updated CS2 to Build 25815307
+before these sessions. Next: create an updated private backup, revalidate local
+camera/pass identity and trace the depth-resource transition before accepting
+cross-resource coverage. Then run the visible front/behind-wall cube oracle.

@@ -4,7 +4,8 @@ bool CCMatrixMatches(float4 actual,float4 expected,int matrixIndex) {
     return !any(isnan(actual)) && !any(isinf(actual)) && all(abs(actual-expected)<=tolerance);
 }
 bool CCGuestVisible(float2 world, float2 finalDepth, float guestZ, float4 planes,
-                    float4 projection, float4 range, bool reversed,bool allowFinalClear) {
+                    float4 projection, float4 range, bool reversed,bool allowFinalClear,float coverage) {
+    if(coverage!=0)return false;
     // Preserve post-world writes and ambiguous MSAA edges. NaNs also fail closed.
     bool finalCleared=allowFinalClear && all(finalDepth==range.zz);
     if((any(world != finalDepth) && !finalCleared) || world.x != world.y || any(isnan(world)) || any(isinf(world)))return false;

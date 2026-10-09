@@ -4,7 +4,7 @@
 using namespace cc;
 void require(bool v,const char* why){if(!v)throw std::runtime_error(why);}
 int main(){try {
-    const auto policy=FusionPolicy::parse({{"schema",1},{"kind","local-world-boundary"},
+    auto policy=FusionPolicy::parse({{"schema",1},{"kind","local-world-boundary"},
         {"worldDepthRange",{0.f,.8f}},{"foregroundDepthRange",{0.f,.2f}},{"clearDepth",1.f},{"cameraDraw",64}});
     const std::array<double,6> world{0,0,160,100,0,double(.8f)},front{0,0,160,100,0,double(.2f)};
     WorldBoundary b;
@@ -15,6 +15,23 @@ int main(){try {
     b.clear_resource(11,true);require(b.ready(),"Observed post-world full clear discarded owned snapshot");
     require(!b.observe(11,world,policy) && b.ready(),"Later world draw replaced the protected snapshot");
     require(!b.observe(11,front,policy) && b.ready(),"Second boundary replaced first snapshot");
+    auto later=world;later[4]=double(.8f);later[5]=1;
+    require(!b.observe(11,later,policy) && b.ready(),"Post-world range invalidated coverage-protected snapshot");
+    later[4]=0;require(!b.observe(11,later,policy) && b.ready(),"Full-range later pass replaced snapshot");
+    require(!b.observe(12,later,policy) && !b.ready(),"Post-world foreign resource escaped rejection");
+    b.reset();b.arm(11,12,world);auto late=world;late[4]=world[5];late[5]=1;
+    require(!b.observe(11,late,policy) && !b.ready(),"Uncalibrated late range accepted");
+    policy.additional_boundaries.push_back({.8f,1.f});b.reset();b.arm(11,12,world);
+    require(b.observe(11,late,policy) && b.ready(),"Measured late range was rejected");
+    b.reset();b.arm(11,12,world);late[2]*=2;
+    require(!b.observe(11,late,policy) && !b.ready(),"Additional boundary ignored dimensions");
+    auto extraPolicy=nlohmann::json{{"schema",1},{"kind","local-world-boundary"},
+        {"worldDepthRange",{0.f,.8f}},{"foregroundDepthRange",{0.f,.2f}},{"clearDepth",1.f},{"cameraDraw",64},
+        {"additionalBoundaryDepthRanges",{{.8f,1.f}}}};
+    require(FusionPolicy::parse(extraPolicy).additional_boundaries.size()==1,"Additional policy not parsed");
+    extraPolicy["additionalBoundaryDepthRanges"]={{.8f,.4f}};bool refused=false;
+    try{FusionPolicy::parse(extraPolicy);}catch(const std::exception&){refused=true;}
+    require(refused,"Invalid additional boundary accepted");
     b.reset();b.arm(11,8,world);require(!b.observe(12,front,policy) && !b.ready(),"Different resource paired");
     b.reset();b.arm(11,9,world);b.clear_resource(11);require(!b.observe(11,front,policy),"Clear reused camera");
     b.reset();b.arm(11,10,world);auto resize=front;resize[2]=320;

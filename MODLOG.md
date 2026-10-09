@@ -1014,3 +1014,38 @@ launch, in-game test, rendering bridge, or complete port has been performed.
   acceptance is claimed. The guest is no longer running. Later CS2 sessions used
   exact-PID termination after console quit did not close them, so those runs do
   not establish graceful addon teardown or leak-free release.
+
+## Retained post-world coverage (2026-10-09)
+
+- Bounded live trace established later world/foreground/full/late-range viewport
+  changes. Added explicit private additional boundary ranges (maximum four).
+  Uncalibrated first transitions and foreign resources still fail closed.
+- Added owned GPU coverage accumulated before each known full depth clear and
+  at effects (maximum eight captures per interval). Weapon/later-write pixels
+  survive repeated clears; subsequent cleared intervals use the clear baseline.
+  Effect checks the mask before accepting guest depth. Snapshot remains immutable.
+- Added hardware clear-retention, MSAA-summary/NaN, next-frame reset, host compute
+  state/CB-range restoration and foreign-device tests. Effect oracle now has 26
+  cases. Latest full native suite passed 19/19; loader 33/33 and package guards
+  3/3 passed. An intermediate old UI FIFO timing test failed once and passed on
+  rerun and the subsequent full suite; no UI behavior was changed.
+- First live coverage run exposed ReShade native/proxy device pointer mismatch;
+  adopted the sampler's unique public private-data identity marker. Latest
+  Steam-local Dust2 run recorded 1746 world snapshots/boundaries, invalid=0,
+  no runtime error; all post-latch viewport changes were accepted. A later
+  different depth resource still causes rejection 1. GPU pairs, relayed cameras
+  and effect-eligible frames remain zero. Visible world fusion is not accepted.
+- Trace JSON is built on the reporter thread from sixteen fixed transition
+  slots. Runtime error text persists rather than being cleared by the next
+  effects callback. Private policies/captures/logs remain ignored.
+- All four new session receipts are Restored, with no restore failure; CS2
+  required verified exact-PID termination. Owned guest closed normally and its
+  log confirms players/worlds/all dimensions saved, followed by successful Gradle
+  completion. PCL install/saves were not used.
+- Old backup diff has no additions/removals but 27 changed retail binaries.
+  Steam content log confirms an official CS2 update committed at 10:08:55 before
+  the first new session, BuildID 25815307 (45 updated, 2 deleted install files).
+  No old retail files were restored. Private camera/depth calibration needs
+  revalidation on this build, and the next session needs a fresh current backup.
+- Created a separate Build 25815307 baseline (105 files); its diff is empty and
+  the ignored machine launcher now points to it. Old snapshots remain intact.

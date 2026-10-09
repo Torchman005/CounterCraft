@@ -1,0 +1,66 @@
+#include "depth_coverage.hpp"
+#include "compositor.hpp"
+#include <d3d11_1.h>
+#include <d3d11sdklayers.h>
+#include <iostream>
+#include <limits>
+
+using namespace cc;
+void require(bool value,const char* why){if(!value)throw std::runtime_error(why);}
+int main(){try {
+    ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;
+    auto h=D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_DEBUG,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context);
+    if(FAILED(h))check(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context),"Coverage hardware device");
+    ComPtr<ID3D11InfoQueue> info;device.As(&info);
+    std::array<std::array<float,2>,4> pixels{{{.75f,.75f},{.75f,.75f},{.75f,.75f},{.75f,.75f}}};
+    D3D11_TEXTURE2D_DESC desc{};desc.Width=4;desc.Height=1;desc.MipLevels=desc.ArraySize=1;
+    desc.Format=DXGI_FORMAT_R32G32_FLOAT;desc.SampleDesc.Count=1;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA initial{pixels.data(),sizeof(pixels),0};
+    ComPtr<ID3D11Texture2D> world,current;check(device->CreateTexture2D(&desc,&initial,&world),"Coverage world");check(device->CreateTexture2D(&desc,&initial,&current),"Coverage current");
+    DepthCoverage coverage(device.Get());coverage.reset(context.Get(),world.Get());
+    auto sentinel=texture(device.Get(),4,1,DXGI_FORMAT_R32_FLOAT);
+    ID3D11ShaderResourceView* srvs[]{sentinel.srv.Get(),sentinel.srv.Get()};context->CSSetShaderResources(0,2,srvs);
+    D3D11_BUFFER_DESC bd{};bd.ByteWidth=512;bd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;ComPtr<ID3D11Buffer> buffer;
+    check(device->CreateBuffer(&bd,nullptr,&buffer),"Coverage sentinel CB");
+    ComPtr<ID3D11DeviceContext1> c1;context.As(&c1);auto* cb=buffer.Get();UINT first=16,count=16;
+    if(c1)c1->CSSetConstantBuffers1(0,1,&cb,&first,&count);else context->CSSetConstantBuffers(0,1,&cb);
+    auto verify=[&](const std::array<float,4>& expected){
+        auto d=desc;d.Format=DXGI_FORMAT_R32_FLOAT;d.BindFlags=0;d.Usage=D3D11_USAGE_STAGING;d.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+        ComPtr<ID3D11Texture2D> staging;check(device->CreateTexture2D(&d,nullptr,&staging),"Coverage staging");
+        context->CopyResource(staging.Get(),coverage.output());D3D11_MAPPED_SUBRESOURCE mapped{};
+        check(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped),"Coverage oracle map");
+        std::array<float,4> actual{};std::memcpy(actual.data(),mapped.pData,sizeof(actual));context->Unmap(staging.Get(),0);
+        require(actual==expected,"Accumulated mask lost/added an occluder");
+        ID3D11ShaderResourceView* retained[2]{};context->CSGetShaderResources(0,2,retained);
+        const bool restored=retained[0]==srvs[0] && retained[1]==srvs[1];for(auto* s:retained)if(s)s->Release();require(restored,"Coverage changed CS SRVs");
+        ComPtr<ID3D11Buffer> retained_cb;UINT f{},n{};
+        if(c1){c1->CSGetConstantBuffers1(0,1,&retained_cb,&f,&n);require(f==first && n==count,"Coverage changed CB range");}
+        else context->CSGetConstantBuffers(0,1,&retained_cb);
+        require(retained_cb.Get()==buffer.Get(),"Coverage changed host CB");
+        ComPtr<ID3D11ComputeShader> shader;context->CSGetShader(&shader,nullptr,nullptr);require(!shader,"Coverage changed host CS");
+        ComPtr<ID3D11UnorderedAccessView> uav;context->CSGetUnorderedAccessViews(0,1,&uav);require(!uav,"Coverage left UAV bound");
+    };
+    coverage.accumulate(context.Get(),world.Get(),current.Get(),false,1);verify({0,0,0,0});
+    pixels[0]={.01f,.01f};context->UpdateSubresource(current.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),current.Get(),false,1);verify({1,0,0,0}); // weapon before clear
+    pixels.fill({1,1});context->UpdateSubresource(current.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),current.Get(),true,1);verify({1,0,0,0}); // clear cannot erase weapon
+    pixels[1]={.9f,.9f};pixels[2]={1,.99f};pixels[3]={std::numeric_limits<float>::quiet_NaN(),1};
+    context->UpdateSubresource(current.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),current.Get(),true,1);verify({1,1,1,1}); // sky/later pass, MSAA edge, NaN
+    pixels.fill({1,1});context->UpdateSubresource(current.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),current.Get(),true,1);verify({1,1,1,1}); // second clear
+    coverage.reset(context.Get(),world.Get());verify({0,0,0,0}); // next interval resets
+    bool refused=false;try{coverage.accumulate(context.Get(),world.Get(),sentinel.texture.Get(),false,1);}catch(const std::exception&){refused=true;}
+    require(refused,"Coverage accepted invalid format");
+    ComPtr<ID3D11Device> foreign_device;ComPtr<ID3D11DeviceContext> foreign_context;
+    check(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&foreign_device,nullptr,&foreign_context),"Foreign coverage device");
+    ComPtr<ID3D11Texture2D> foreign;
+    check(foreign_device->CreateTexture2D(&desc,&initial,&foreign),"Foreign coverage texture");
+    refused=false;try{coverage.accumulate(context.Get(),world.Get(),foreign.Get(),false,1);}catch(const std::exception&){refused=true;}
+    require(refused,"Device marker admitted foreign coverage texture");
+    refused=false;try{coverage.reset(foreign_context.Get(),world.Get());}catch(const std::exception&){refused=true;}
+    require(refused,"Device marker admitted foreign coverage context");
+    if(info)for(UINT64 i=0;i<info->GetNumStoredMessages();++i){SIZE_T bytes=0;info->GetMessage(i,nullptr,&bytes);std::vector<uint8_t> storage(bytes);auto* m=reinterpret_cast<D3D11_MESSAGE*>(storage.data());info->GetMessage(i,m,&bytes);require(m->Severity>D3D11_MESSAGE_SEVERITY_WARNING,"Coverage D3D11 warning/error");}
+    context->ClearState();std::cout<<"Hardware accumulated coverage, clear retention and state restoration passed\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -4,12 +4,14 @@
 #include <cmath>
 #include <stdexcept>
 #include <json.hpp>
+#include <vector>
 
 namespace cc {
 struct FusionPolicy {
     std::array<float,2> world{},foreground{};
     float clear{};
     uint32_t camera_draw{64};
+    std::vector<std::array<float,2>> additional_boundaries;
     static FusionPolicy parse(const nlohmann::json& j) {
         if(j.at("schema")!=1 || j.at("kind")!="local-world-boundary")
             throw std::runtime_error("Unsupported fusion policy");
@@ -21,14 +23,21 @@ struct FusionPolicy {
                 throw std::runtime_error("Invalid fusion viewport range");
         if(p.world==p.foreground || !std::isfinite(p.clear) || p.clear<0 || p.clear>1 || !p.camera_draw || p.camera_draw>4096)
             throw std::runtime_error("Invalid fusion boundary policy");
+        if(j.contains("additionalBoundaryDepthRanges")){
+            p.additional_boundaries=j.at("additionalBoundaryDepthRanges").get<std::vector<std::array<float,2>>>();
+            if(p.additional_boundaries.size()>4)throw std::runtime_error("Too many fusion boundaries");
+            for(const auto& range:p.additional_boundaries)
+                if(!std::isfinite(range[0]) || !std::isfinite(range[1]) || range[0]<0 || range[1]>1 || range[0]>=range[1] || range==p.world)
+                    throw std::runtime_error("Invalid additional fusion boundary");
+        }
         return p;
     }
 };
 
 // A camera copied in the world pass can only accompany the first following
 // world -> foreground boundary on that same resource and effect interval.
-// No draw index identifies the boundary. A second candidate or re-entry rejects
-// the whole interval instead of guessing which depth belongs to the scene.
+// No draw index identifies the boundary. Once latched, coverage tracks later
+// writes independently of their viewport range; the snapshot never changes.
 struct WorldBoundary {
     uint64_t resource{},sequence{};
     bool armed{},latched{},invalid{};
@@ -46,12 +55,12 @@ struct WorldBoundary {
     bool observe(uint64_t r,const std::array<double,6>& v,const FusionPolicy& p) {
         if(!armed || invalid)return false;
         if(r!=resource){invalid=true;rejection=1;return false;}
-        // Later draws with the original viewport are conservatively protected
-        // by final-depth comparison; they cannot overwrite the latched snapshot.
+        if(latched)return false;
         if(v==viewport)return false;
         auto expected=viewport;expected[4]=p.foreground[0];expected[5]=p.foreground[1];
-        if(!latched && v==expected){latched=true;return true;}
-        if(latched && v==expected)return false;
+        bool calibrated=v==expected;
+        for(const auto& range:p.additional_boundaries){expected[4]=range[0];expected[5]=range[1];calibrated=calibrated || v==expected;}
+        if(calibrated){latched=true;return true;}
         invalid=true;rejection=2;return false;
     }
     bool ready()const{return armed && latched && !invalid;}
