@@ -1002,8 +1002,15 @@ launch, in-game test, rendering bridge, or complete port has been performed.
   boundaries, but `effectEligibleFrames` and `compositeFrames` remained zero in
   the real Dust2 run. The real visible MC cube/occlusion acceptance therefore
   remains open. This stage is an experimental guarded pipeline, not a claim of
-  completed world fusion.
+  completed world fusion. The latest run still rejects a later noncalibrated
+  depth viewport (boundary rejection 2). No further pass identity was guessed.
 - Private calibration, policies, captures and session receipts remain ignored;
   temporary loader files were restored after every run. The latest alpha.3
   source package contains 148 audited files and no game assets or saves.
-
+  All six session receipts are Restored with no restore failure; backup diff
+  added/removed/changed lists are empty. Test commands removed temporary blocks
+  and restored the creative player to feet(3.5,131,-7.5), eye132.62, health20.
+  The singleplayer command registry rejected save-all; no explicit save command
+  acceptance is claimed. The guest is no longer running. Later CS2 sessions used
+  exact-PID termination after console quit did not close them, so those runs do
+  not establish graceful addon teardown or leak-free release.
