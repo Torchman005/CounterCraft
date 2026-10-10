@@ -17,6 +17,7 @@ texture HostCoverage : COUNTERCRAFT_HOST_COVERAGE;
 sampler HostCoverageSampler { Texture = HostCoverage; MinFilter = POINT; MagFilter = POINT; };
 uniform bool CCFusion = false;
 uniform bool CCWorldFusion = false;
+uniform uint CCFusionDiagnostic = 0; // private lab policy only; disabled by default
 texture HostCamera : COUNTERCRAFT_HOST_CAMERA;
 sampler HostCameraSampler { Texture = HostCamera; MinFilter = POINT; MagFilter = POINT; };
 uniform float4 CCExpectedCamera[16];
@@ -48,6 +49,14 @@ float4 MatchCameraPS(float4 position : SV_Position, float2 uv : TEXCOORD) : SV_T
 float4 ProbePS(float4 position : SV_Position, float2 uv : TEXCOORD) : SV_Target {
     float4 host = tex2D(HostSampler, uv);
     if (!CCActive || any(CCSize <= 0)) return host;
+    if(CCWorldFusion && CCFusionDiagnostic!=0){
+        if(CCFusionDiagnostic==1){
+            if(!CCFusion)return float4(0,0,1,1);
+            return tex2D(CameraMatchSampler,float2(.5,.5)).r>.5?float4(0,1,0,1):float4(1,0,0,1);
+        }
+        if(CCFusionDiagnostic==2)return CCFusion?float4(tex2D(HostCoverageSampler,uv).rrr,1):float4(0,0,1,1);
+        if(CCFusionDiagnostic==3)return tex2D(GuestSampler,float2(uv.x,1-uv.y));
+    }
     if(CCFusion && !CCFullClient) {
         if(tex2D(CameraMatchSampler,float2(.5,.5)).r<.5)return host;
         float2 world = tex2D(HostWorldSampler,uv).rg;

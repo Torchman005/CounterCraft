@@ -1,4 +1,5 @@
 #include "depth_coverage.hpp"
+#include "coverage_journal.hpp"
 #include "compositor.hpp"
 #include <d3d11_1.h>
 #include <d3d11sdklayers.h>
@@ -24,12 +25,17 @@ int main(){try {
     check(device->CreateBuffer(&bd,nullptr,&buffer),"Coverage sentinel CB");
     ComPtr<ID3D11DeviceContext1> c1;context.As(&c1);auto* cb=buffer.Get();UINT first=16,count=16;
     if(c1)c1->CSSetConstantBuffers1(0,1,&cb,&first,&count);else context->CSSetConstantBuffers(0,1,&cb);
+    unsigned oracle_case=0;
     auto verify=[&](const std::array<float,4>& expected){
+        ++oracle_case;
         auto d=desc;d.Format=DXGI_FORMAT_R32_FLOAT;d.BindFlags=0;d.Usage=D3D11_USAGE_STAGING;d.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
         ComPtr<ID3D11Texture2D> staging;check(device->CreateTexture2D(&d,nullptr,&staging),"Coverage staging");
         context->CopyResource(staging.Get(),coverage.output());D3D11_MAPPED_SUBRESOURCE mapped{};
         check(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped),"Coverage oracle map");
         std::array<float,4> actual{};std::memcpy(actual.data(),mapped.pData,sizeof(actual));context->Unmap(staging.Get(),0);
+        if(actual!=expected){std::cerr<<"Coverage case "<<oracle_case<<" expected";
+            for(auto v:expected)std::cerr<<' '<<v;std::cerr<<" actual";
+            for(auto v:actual)std::cerr<<' '<<v;std::cerr<<'\n';}
         require(actual==expected,"Accumulated mask lost/added an occluder");
         ID3D11ShaderResourceView* retained[2]{};context->CSGetShaderResources(0,2,retained);
         const bool restored=retained[0]==srvs[0] && retained[1]==srvs[1];for(auto* s:retained)if(s)s->Release();require(restored,"Coverage changed CS SRVs");
@@ -51,6 +57,48 @@ int main(){try {
     pixels.fill({1,1});context->UpdateSubresource(current.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
     coverage.accumulate(context.Get(),world.Get(),current.Get(),true,1);verify({1,1,1,1}); // second clear
     coverage.reset(context.Get(),world.Get());verify({0,0,0,0}); // next interval resets
+    ComPtr<ID3D11Texture2D> second;
+    check(device->CreateTexture2D(&desc,&initial,&second),"Second coverage resource");
+    pixels={{{.75f,.75f},{.02f,.02f},{.75f,.75f},{.75f,.75f}}};
+    context->UpdateSubresource(second.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),second.Get(),false,1,true);verify({0,1,0,0});
+    pixels.fill({1,1});context->UpdateSubresource(second.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),second.Get(),true,1,true);verify({0,1,0,0});
+    pixels={{{.01f,.01f},{.75f,.75f},{.75f,.75f},{.75f,.75f}}};
+    context->UpdateSubresource(current.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),current.Get(),false,1);verify({1,1,0,0}); // same-resource write still accumulates
+    coverage.reset(context.Get(),world.Get());
+    pixels.fill({.7500001f,.7500001f});context->UpdateSubresource(second.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),second.Get(),false,1,true);verify({0,0,0,0}); // resolved quantization
+    pixels.fill({.7f,.8f});context->UpdateSubresource(world.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    pixels={{{.75f,.75f},{.65f,.75f},{.75f,.85f},{.7f,.8f}}};
+    context->UpdateSubresource(second.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),second.Get(),false,1,true);verify({0,1,1,0}); // overlap is insufficient
+    pixels={{{std::numeric_limits<float>::quiet_NaN(),.75f},{.75f,.75f},{.75f,.75f},{.75f,std::numeric_limits<float>::infinity()}}};
+    context->UpdateSubresource(second.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),second.Get(),false,1,true);verify({1,1,1,1}); // foreign invalid ranges stay protected
+    pixels.fill({.75f,.75f});context->UpdateSubresource(second.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),second.Get(),false,1,true);verify({1,1,1,1}); // no later resolve erases coverage
+    // Replay actual GPU overwrites through the same journal used by the
+    // adapter: copy destinations may never be bound when effects begin.
+    pixels.fill({.75f,.75f});context->UpdateSubresource(world.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    context->CopyResource(current.Get(),world.Get());context->CopyResource(second.Get(),world.Get());
+    coverage.reset(context.Get(),world.Get());CoverageJournal journal;journal.begin(1);
+    auto capture=[&](uint64_t resource,bool cleared){
+        coverage.accumulate(context.Get(),world.Get(),resource==1?current.Get():second.Get(),cleared,1,resource!=1);
+    };
+    pixels[0]={.01f,.01f};context->UpdateSubresource(current.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    journal.copy(1,capture);context->CopyResource(current.Get(),world.Get());verify({1,0,0,0});
+    journal.copy(2,capture);context->CopyResource(second.Get(),world.Get());
+    pixels.fill({.75f,.75f});pixels[1]={.02f,.02f};
+    context->UpdateSubresource(second.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    journal.clear(2,true,capture);pixels.fill({1,1});
+    context->UpdateSubresource(second.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);verify({1,1,0,0});
+    journal.copy(2,capture);context->CopyResource(second.Get(),world.Get());
+    pixels.fill({.75f,.75f});pixels[2]={.03f,.03f};
+    context->UpdateSubresource(second.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
+    journal.capture(1,capture,true);journal.flush(capture);verify({1,1,1,0});
+    journal.reset();coverage.reset(context.Get(),world.Get());verify({0,0,0,0});
     bool refused=false;try{coverage.accumulate(context.Get(),world.Get(),sentinel.texture.Get(),false,1);}catch(const std::exception&){refused=true;}
     require(refused,"Coverage accepted invalid format");
     ComPtr<ID3D11Device> foreign_device;ComPtr<ID3D11DeviceContext> foreign_context;

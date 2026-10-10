@@ -1049,3 +1049,32 @@ launch, in-game test, rendering bridge, or complete port has been performed.
   revalidation on this build, and the next session needs a fresh current backup.
 - Created a separate Build 25815307 baseline (105 files); its diff is empty and
   the ignored machine launcher now points to it. Old snapshots remain intact.
+
+## Cross-resource coverage completion and status reconciliation (2026-10-10)
+
+- Continued the seven unfinished source files from the later private resource
+  experiments: cross-resource MSAA range protection, copy callbacks, 128-event
+  bounded resource/color/write trace, decoded camera report and opt-in diagnostics.
+- Reconciled stale zero-eligible documentation with actual records. Resource
+  session 8's saved mid-session report records 127,198 eligible submissions;
+  session 9's final ReShade report records 145,144, with 1,795,916 boundaries/GPU
+  pairs, 23,908 matched guest camera frames, 896 reconnects and 2,988 invalid
+  intervals. Trace truncation and unsupported-pose error remain. These counters
+  and private scene screenshots do not establish correct wall occlusion.
+- Added a fixed sixteen-resource, 32-capture post-world write journal. Retains
+  dirty contents before clear/copy overwrites, observes previously unbound depth
+  copy destinations, resets their baseline after copy and flushes all dirty
+  destinations before accepting camera/depth. Capture failure rejects the current
+  pair; unsupported post-world depth writes/copies/clears reject the interval.
+- Added event replay for overwrite ordering, unbound-copy final flush, repeated
+  clears, reset, GPU-failure propagation and capacity/capture limits. Hardware
+  coverage tests replay real GPU copies/clears and independently read the retained
+  mask, alongside MSAA range/quantization/NaN and host compute-state checks.
+- Final validation: native CTest 20/20, bridge Python 41/41, loader/supervisor
+  fixtures 33/33, guest launcher 3/3 and package guards 3/3. The native builder
+  verified compiler header dependencies. Java source unchanged; no Java rebuild.
+- No real game launch or game-folder writes in this continuation. Actual new
+  callback paths and complete ReShade effect compilation remain unverified in
+  CS2; stricter coverage checks may reduce eligible frames. Added Chinese project
+  status, code ownership and ordered acceptance plan. `liveOcclusionVerified`
+  remains false; player/collision/chunk integration remains unimplemented.

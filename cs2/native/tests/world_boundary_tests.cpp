@@ -18,7 +18,7 @@ int main(){try {
     auto later=world;later[4]=double(.8f);later[5]=1;
     require(!b.observe(11,later,policy) && b.ready(),"Post-world range invalidated coverage-protected snapshot");
     later[4]=0;require(!b.observe(11,later,policy) && b.ready(),"Full-range later pass replaced snapshot");
-    require(!b.observe(12,later,policy) && !b.ready(),"Post-world foreign resource escaped rejection");
+    require(!b.observe(12,later,policy) && b.ready(),"Covered post-world resource replaced snapshot");
     b.reset();b.arm(11,12,world);auto late=world;late[4]=world[5];late[5]=1;
     require(!b.observe(11,late,policy) && !b.ready(),"Uncalibrated late range accepted");
     policy.additional_boundaries.push_back({.8f,1.f});b.reset();b.arm(11,12,world);
@@ -32,6 +32,14 @@ int main(){try {
     extraPolicy["additionalBoundaryDepthRanges"]={{.8f,.4f}};bool refused=false;
     try{FusionPolicy::parse(extraPolicy);}catch(const std::exception&){refused=true;}
     require(refused,"Invalid additional boundary accepted");
+    extraPolicy.erase("additionalBoundaryDepthRanges");
+    require(FusionPolicy::parse(extraPolicy).diagnostic_view==0,"Diagnostics enabled by default");
+    for(int view=0;view<=3;++view){extraPolicy["diagnosticView"]=view;
+        require(FusionPolicy::parse(extraPolicy).diagnostic_view==uint32_t(view),"Diagnostic mode not parsed");}
+    for(const auto& bad:std::vector<nlohmann::json>{-1,4,1.5,true,"2",nullptr}){
+        extraPolicy["diagnosticView"]=bad;refused=false;
+        try{FusionPolicy::parse(extraPolicy);}catch(const std::exception&){refused=true;}
+        require(refused,"Invalid diagnostic mode accepted");}
     b.reset();b.arm(11,8,world);require(!b.observe(12,front,policy) && !b.ready(),"Different resource paired");
     b.reset();b.arm(11,9,world);b.clear_resource(11);require(!b.observe(11,front,policy),"Clear reused camera");
     b.reset();b.arm(11,10,world);auto resize=front;resize[2]=320;

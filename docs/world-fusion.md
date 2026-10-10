@@ -35,11 +35,20 @@ depth. Resource changes, unknown/partial clears, missing bindings and incompatib
 viewports before the latch reject the interval. An observed full clear after the
 latched world snapshot captures accumulated coverage before the clear executes.
 Later viewports cannot redefine the owned snapshot. Resource changes still reject
-the interval because coverage from a different depth resource is not established.
+the interval before the latch. After the latch, compatible output-sized depth
+resources are independently tracked and conservatively compared with the owned
+world min/max range. A single-sample resolve inside that range is allowed, with
+a raw-depth tolerance of 1e-5; any range extending outside it is protected.
+This does not establish the semantic identity of every later pass.
 
 World and final depth are copied into owned GPU textures using the existing
 single/MSAA sampler. An owned GPU mask retains changed pixels before every known
-clear and at the effect boundary, with a limit of eight captures per interval.
+clear, before depth-copy overwrites, on resource switches and at the effect
+boundary, with a limit of 32 captures per interval and sixteen tracked resources.
+Copy destinations are observed even before their first DSV binding. A value-only
+write journal flushes every dirty destination, including unbound ones, before
+camera/depth acceptance; failures reject the interval. Unsupported post-world
+depth writes/copies/clears reject rather than silently escaping coverage.
 After the first clear, subsequent comparisons use the observed clear as their
 baseline. The mask never resets until the next world snapshot, so a later clear
 cannot erase a previously detected weapon or scene write. The effect keeps these
@@ -65,12 +74,21 @@ host COM reference retained between callbacks.
 
 Reports distinguish camera snapshots, observed boundaries, GPU frame pairs and
 effect-eligible submissions. These counters do **not** count visible MC pixels
-or prove scene occlusion. Reports retain up to sixteen viewport transitions in
+or prove scene occlusion. Reports retain up to 128 resource/viewport events in
 fixed storage; JSON serialization occurs in the reporting thread. The latest
-real Dust2 run has **zero effect-eligible frames**: post-latch viewport changes
-now pass, but a subsequent different depth resource rejects the interval. GPU
-coverage initialization works through ReShade's device proxy and has no recorded
-runtime failure in that run. This is an
-unfinished experiment, not usable world fusion. `liveOcclusionVerified` remains false until a recorded
+recorded Dust2 session's final report has **145,144 effect-eligible submissions**,
+with 1,795,916 world boundaries/GPU pairs and 23,908 matched guest camera frames.
+It also records 896 reconnects, 2,988 invalid intervals and a truncated event trace.
+Earlier private screenshots show guest scene content, but these observations do
+not prove correct wall occlusion. The 2026-10-10 write-journal and unsupported-write
+checks have passed native tests, not a new CS2 run. GPU coverage initialization
+uses the verified public device identity marker through ReShade's device proxy.
+This remains an unfinished experiment. `liveOcclusionVerified` remains false until a recorded
 front/behind-wall scene oracle passes. A mathematical pass or inset screenshot
 cannot substitute for that acceptance.
+
+An optional private-policy `diagnosticView` integer is disabled by default (0).
+Mode 1 displays blue for unavailable fusion, red for GPU camera mismatch and
+green for a match; mode 2 displays retained coverage; mode 3 displays guest color.
+These diagnostic outputs bypass normal display and cannot count as occlusion
+acceptance. See [current status and next acceptance](project-status.md).

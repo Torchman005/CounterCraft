@@ -1,5 +1,23 @@
 # CounterCraft offline modding plan
 
+## Current checkpoint (2026-10-10, cross-resource coverage)
+
+Reconciled the seven unfinished source files with the later private resource
+experiments. The latest session's final report records 1,795,916 world boundaries,
+1,795,916 GPU pairs and 145,144 effect-eligible submissions. These are pipeline counters;
+`liveOcclusionVerified` remains false. The earlier zero-eligible checkpoint below
+is historical. Private screenshots contain guest scene content but do not prove
+a controlled front/behind-wall result or player/collision integration.
+
+Completed bounded post-world write history, observation of previously unbound
+depth copy destinations, capture before overwrites and flushing all dirty
+destinations. Unsupported post-world depth writes/copies/clears now reject the
+interval. Camera acceptance follows successful coverage completion. Native
+event replay and hardware overwrite/clear/copy tests cover these paths; the new
+adapter changes still need a real CS2 run. See [project status](docs/project-status.md)
+for the ordered acceptance plan. The default remains the playable full-client
+bridge; world fusion remains an opt-in experiment.
+
 ## Current checkpoint (2026-10-09, alpha.2)
 Experimental world fusion now has an opt-in supervised launcher, owned world/
 final depth, a current-frame GPU matrix gate and passing hardware oracles. Real

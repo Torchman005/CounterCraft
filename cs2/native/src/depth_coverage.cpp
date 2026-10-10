@@ -13,12 +13,21 @@ void ok(HRESULT h,const char* why){if(FAILED(h))throw std::runtime_error(why);}
 const char* source=R"HLSL(
 Texture2D<float2> world:register(t0);Texture2D<float2> current:register(t1);
 RWTexture2D<float> coverage:register(u0);
-cbuffer Baseline:register(b0){uint cleared;float clear;uint2 reserved;}
+cbuffer Baseline:register(b0){uint cleared;float clear;uint cross_resource;uint reserved;}
 [numthreads(8,8,1)]void cs(uint3 p:SV_DispatchThreadID){
     uint w,h;coverage.GetDimensions(w,h);if(p.x>=w || p.y>=h)return;
     float2 a=cleared?float2(clear,clear):world.Load(int3(p.xy,0));
     float2 b=current.Load(int3(p.xy,0));
-    if(any(a!=b) || any(isnan(a)) || any(isinf(a)))coverage[p.xy]=1;
+    // Integer exponent checks survive HLSL finite-value optimizations.
+    bool invalid=any((asuint(a)&0x7f800000u)==0x7f800000u) || any((asuint(b)&0x7f800000u)==0x7f800000u);
+    bool changed;
+    if(cross_resource){
+        float eps=1e-5;
+        // A resolve can select any sample inside the immutable world range.
+        // An overlapping range that extends outside it still contains a write.
+        changed=b.x<a.x-eps || b.y>a.y+eps;
+    }else changed=any(a!=b);
+    if(changed || invalid)coverage[p.xy]=1;
 })HLSL";
 struct State {
     ID3D11DeviceContext* c;
@@ -76,7 +85,7 @@ void DepthCoverage::reset(ID3D11DeviceContext* context,ID3D11Texture2D* world){
     }
     const float zeros[4]{};context->ClearUnorderedAccessViewFloat(target_.Get(),zeros);
 }
-void DepthCoverage::accumulate(ID3D11DeviceContext* context,ID3D11Texture2D* world,ID3D11Texture2D* current,bool cleared,float clear){
+void DepthCoverage::accumulate(ID3D11DeviceContext* context,ID3D11Texture2D* world,ID3D11Texture2D* current,bool cleared,float clear,bool cross_resource){
     D3D11_TEXTURE2D_DESC a{},b{},out{};shape(world,a);shape(current,b);
     if(!output_)throw std::runtime_error("Uninitialized coverage");output_->GetDesc(&out);
     ComPtr<ID3D11Device> actual;if(context)context->GetDevice(&actual);
@@ -88,7 +97,7 @@ void DepthCoverage::accumulate(ID3D11DeviceContext* context,ID3D11Texture2D* wor
         if(prior.Get()!=texture){view.Reset();ok(device_->CreateShaderResourceView(texture,nullptr,&view),"Coverage input SRV");}
     };
     bind(world,world_view_);bind(current,current_view_);
-    struct Parameters{UINT cleared;float clear;UINT reserved[2];} parameters{cleared?1u:0u,clear,{}};
+    struct Parameters{UINT cleared;float clear;UINT cross_resource;UINT reserved;} parameters{cleared?1u:0u,clear,cross_resource?1u:0u,0};
     State state(context);context->UpdateSubresource(constants_.Get(),0,nullptr,&parameters,0,0);
     auto* cb=constants_.Get();auto* u=target_.Get();UINT keep=UINT(-1);ID3D11ShaderResourceView* srvs[]{world_view_.Get(),current_view_.Get()};
     context->CSSetShader(shader_.Get(),nullptr,0);context->CSSetConstantBuffers(0,1,&cb);

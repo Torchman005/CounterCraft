@@ -12,7 +12,7 @@ public:
     DepthCoverage& operator=(const DepthCoverage&)=delete;
     void reset(ID3D11DeviceContext*,ID3D11Texture2D* world);
     void accumulate(ID3D11DeviceContext*,ID3D11Texture2D* world,ID3D11Texture2D* current,
-                    bool baseline_cleared,float clear);
+                    bool baseline_cleared,float clear,bool cross_resource=false);
     ID3D11ShaderResourceView* view()const{return view_.Get();}
     ID3D11Texture2D* output()const{return output_.Get();}
 private:

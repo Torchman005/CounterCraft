@@ -12,6 +12,7 @@ struct FusionPolicy {
     float clear{};
     uint32_t camera_draw{64};
     std::vector<std::array<float,2>> additional_boundaries;
+    uint32_t diagnostic_view{};
     static FusionPolicy parse(const nlohmann::json& j) {
         if(j.at("schema")!=1 || j.at("kind")!="local-world-boundary")
             throw std::runtime_error("Unsupported fusion policy");
@@ -29,6 +30,12 @@ struct FusionPolicy {
             for(const auto& range:p.additional_boundaries)
                 if(!std::isfinite(range[0]) || !std::isfinite(range[1]) || range[0]<0 || range[1]>1 || range[0]>=range[1] || range==p.world)
                     throw std::runtime_error("Invalid additional fusion boundary");
+        }
+        if(j.contains("diagnosticView")){
+            const auto& value=j.at("diagnosticView");
+            if(!value.is_number_unsigned() && !value.is_number_integer())throw std::runtime_error("Invalid fusion diagnostic view");
+            if(value.get<double>()<0 || value.get<double>()>3)throw std::runtime_error("Invalid fusion diagnostic view");
+            p.diagnostic_view=value.get<uint32_t>();
         }
         return p;
     }
@@ -54,8 +61,8 @@ struct WorldBoundary {
     }}
     bool observe(uint64_t r,const std::array<double,6>& v,const FusionPolicy& p) {
         if(!armed || invalid)return false;
+        if(latched)return false; // adapter must accumulate coverage for every later resource
         if(r!=resource){invalid=true;rejection=1;return false;}
-        if(latched)return false;
         if(v==viewport)return false;
         auto expected=viewport;expected[4]=p.foreground[0];expected[5]=p.foreground[1];
         bool calibrated=v==expected;
