@@ -122,6 +122,10 @@ class Fixture:
                     binary.sendall(make_packet(camera=camera))
                 elif self.scenario == "blocked":
                     binary.sendall(b"CCF")  # Cancellation in the middle of a header.
+                elif self.scenario == "idle-resume":
+                    binary.sendall(make_packet())
+                    if self.closed.wait(2.3):return
+                    binary.sendall(make_packet(sequence=2))
                 else:
                     data = make_packet(full=self.full)
                     if self.scenario == "fragment":
@@ -151,6 +155,25 @@ class Fixture:
 
 
 class NativeSocketTests(unittest.TestCase):
+    def test_idle_frame_delivery_keeps_healthy_control_and_resumes(self):
+        fixture = Fixture('idle-resume'); fixture.start()
+        try:
+            result = subprocess.run([str(PROBE), str(fixture.port), '2.8'],
+                capture_output=True, text=True, timeout=6, check=True)
+            report = json.loads(result.stdout)
+            self.assertEqual(report['failure'], '')
+            self.assertEqual(report['received'], 2)
+            self.assertEqual(report['last'], 2)
+            self.assertTrue(report['idleHidFrame'])
+            self.assertTrue(report['latest'])
+            self.assertLess(report['stopMs'], 200)
+        finally:fixture.close()
+
+    def test_partial_header_still_times_out(self):
+        report = self.run_case('blocked', 2.8)
+        self.assertRegex(report['failure'], r'(timed out|deadline)')
+        self.assertEqual(report['received'], 0)
+        self.assertFalse(report['latest'])
     def test_old_guest_fails_before_stream_or_input(self):
         fixture=Fixture('old-guest');fixture.start()
         try:
@@ -253,7 +276,7 @@ class NativeSocketTests(unittest.TestCase):
         fixture = Fixture(name, offline); fixture.start()
         try:
             result = subprocess.run([str(PROBE), str(fixture.port), str(seconds)],
-                                    text=True, capture_output=True, timeout=5, check=True)
+                                    text=True, capture_output=True, timeout=6, check=True)
             data = json.loads(result.stdout)
             self.assertTrue(data["cleared"])
             self.assertLess(data["stopMs"], 200, data)

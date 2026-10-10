@@ -11,11 +11,19 @@ Use the supervised Steam launcher with your own private calibration:
 ./game/play.ps1 -Mode Play -Cs2Root '<CS2 root>' -BackupSnapshot '<completed backup.zip>' -SessionDirectory '<fresh local session>' -WorldFusion -CameraLayout '<private camera-layout.json>' -FusionPolicy '<private fusion-policy.json>'
 ```
 
-Start the isolated, unpaused MC lab first. The regular offline guard, fixed
+The configured launcher can now start and supervise both processes:
+
+```powershell
+./game/start.ps1 -Launch -WorldFusion -CameraLayout '<private camera-layout.json>' -FusionPolicy '<private fusion-policy.json>' -SessionDirectory '<fresh local session>'
+```
+
+Omit `-Launch` to preview. Calibration files are required and checked before
+starting MC; arguments without `-WorldFusion` are rejected. For `play.ps1`,
+start the isolated, unpaused MC lab first. The regular offline guard, fixed
 `-insecure` Steam child verification and hash-guarded loader restoration apply.
 `WorldFusion` cannot be combined with gameplay input. Calibration is copied into
 the private session candidate, never embedded in a binary or published. The
-regular configured launcher continues to use the accepted full-client mode.
+configured launcher defaults to the accepted full-client mode.
 
 The boundary policy has schema 1, kind `local-world-boundary`, two separately
 measured `worldDepthRange` and `foregroundDepthRange` arrays, an observed
@@ -27,6 +35,16 @@ automatic guesses based on their numeric values. A milestone is not a stable wor
 The viewport boundary is detected from draws; its draw index is never hardcoded.
 Do not copy another game's calibration or assume a map/update has the same passes.
 
+An optional `additionalCoverageDepthSizes` accepts up to four exact `[width,height]`
+integer pairs, each dimension in 1..4096. Use only locally observed post-world
+resources. They must be no larger than the output and may participate only after
+the world boundary is latched. Reduced-resource depth writes require one viewport
+covering the entire texture at origin zero. Such resources never replace the world
+camera or boundary. The GPU expands each texel to its output footprint using
+integer proportional coordinates, retaining detected writes through later clears.
+Unknown sizes or partial reduced viewports reject the interval. Resize requires
+new local evidence; this is conservative coverage, not automatic pass detection.
+
 The adapter requires an output-sized single-layer depth resource, a full observed
 clear, a world camera snapshot and the first matching world-to-foreground depth
 range change on the same resource in the same effect interval. The camera is
@@ -35,7 +53,7 @@ depth. Resource changes, unknown/partial clears, missing bindings and incompatib
 viewports before the latch reject the interval. An observed full clear after the
 latched world snapshot captures accumulated coverage before the clear executes.
 Later viewports cannot redefine the owned snapshot. Resource changes still reject
-the interval before the latch. After the latch, compatible output-sized depth
+the interval before the latch. After the latch, output-sized or calibrated reduced depth
 resources are independently tracked and conservatively compared with the owned
 world min/max range. A single-sample resolve inside that range is allowed, with
 a raw-depth tolerance of 1e-5; any range extending outside it is protected.
@@ -75,13 +93,25 @@ host COM reference retained between callbacks.
 Reports distinguish camera snapshots, observed boundaries, GPU frame pairs and
 effect-eligible submissions. These counters do **not** count visible MC pixels
 or prove scene occlusion. Reports retain up to 128 resource/viewport events in
-fixed storage; JSON serialization occurs in the reporting thread. The latest
-recorded Dust2 session's final report has **145,144 effect-eligible submissions**,
-with 1,795,916 world boundaries/GPU pairs and 23,908 matched guest camera frames.
-It also records 896 reconnects, 2,988 invalid intervals and a truncated event trace.
-Earlier private screenshots show guest scene content, but these observations do
-not prove correct wall occlusion. The 2026-10-10 write-journal and unsupported-write
-checks have passed native tests, not a new CS2 run. GPU coverage initialization
+fixed storage; JSON serialization occurs in the reporting thread. `lastUnsupportedDepth`
+records the last unsupported **draw write**, including resource/color shapes and
+viewport; it may persist after later clear/copy errors and is not a failure count.
+The 2026-10-10 Dust2 live13 final report has **43,331 effect-eligible submissions**,
+46,565 boundaries, 45,227 GPU pairs, 3,861 matched guest camera frames, 4,183 received
+frames, 2 reconnects and 2,091 invalid intervals. Its trace is truncated and its
+last error is an unsupported host pose. Both sampled connection failures report
+the existing 64-block camera distance restriction; no idle receive deadline
+failure was sampled. Session durations and scenes differ, so these are not a
+controlled performance comparison with the earlier 145,144-submission session.
+
+The new strict checks initially rejected every interval. Live diagnostics measured
+420x262, 840x525 and 420x525 post-world resources at the 1680x1050 output; the final
+private policy includes only these three sizes. Live13 recorded no unsupported
+draw-write descriptor. This does not prove all clears/copies or poses are supported.
+Complete ReShade FX compilation succeeded during live10, and real callbacks ran
+through live13. Dust2 screenshots still do not prove visible guest pixels or wall
+occlusion in these runs. All four new sessions restored their loaders, closed owned
+guests, and the postflight game-folder hash diff is empty. GPU coverage initialization
 uses the verified public device identity marker through ReShade's device proxy.
 This remains an unfinished experiment. `liveOcclusionVerified` remains false until a recorded
 front/behind-wall scene oracle passes. A mathematical pass or inset screenshot

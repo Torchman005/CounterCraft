@@ -18,6 +18,7 @@ int main(int argc, char** argv) {
         const auto began = cc::monotonic_ns();
         uint64_t observed = 0, last = 0;
         bool saw_depth = false;
+        bool idle_hid_frame = false;
         unsigned camera_stage=0;
         bool ui_issued=false;
         while (double(cc::monotonic_ns() - began) / 1e9 < seconds) {
@@ -42,7 +43,7 @@ int main(int argc, char** argv) {
                     ++observed; last = frame->header.sequence;
                     saw_depth = frame->rgba().size() == 8 && frame->depth().size() == 8;
                 }
-            }
+            }else if(elapsed>.9 && receiver.stats().received)idle_hid_frame=true;
             if (!receiver.stats().failure.empty()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 break;
@@ -55,6 +56,7 @@ int main(int argc, char** argv) {
         receiver.stop();
         std::cout << nlohmann::json{{"received",status.received},{"stale",status.stale},
             {"observed",observed},{"last",last},{"payload",saw_depth},{"latest",latest},
+            {"idleHidFrame",idle_hid_frame},
             {"failure",status.failure},{"cleared",!receiver.latest()},
             {"camerasSent",status.cameras_sent},{"cameraReleases",status.camera_releases},
             {"cameraFramesMatched",status.cameras_rendered},

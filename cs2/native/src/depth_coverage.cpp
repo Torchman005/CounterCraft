@@ -17,7 +17,11 @@ cbuffer Baseline:register(b0){uint cleared;float clear;uint cross_resource;uint 
 [numthreads(8,8,1)]void cs(uint3 p:SV_DispatchThreadID){
     uint w,h;coverage.GetDimensions(w,h);if(p.x>=w || p.y>=h)return;
     float2 a=cleared?float2(clear,clear):world.Load(int3(p.xy,0));
-    float2 b=current.Load(int3(p.xy,0));
+    uint cw,ch;current.GetDimensions(cw,ch);
+    // Every smaller-source texel expands to its conservative output footprint.
+    // The adapter requires an explicitly calibrated, full-resource viewport.
+    uint2 q=min(p.xy*uint2(cw,ch)/uint2(w,h),uint2(cw-1,ch-1));
+    float2 b=current.Load(int3(q,0));
     // Integer exponent checks survive HLSL finite-value optimizations.
     bool invalid=any((asuint(a)&0x7f800000u)==0x7f800000u) || any((asuint(b)&0x7f800000u)==0x7f800000u);
     bool changed;
@@ -90,7 +94,8 @@ void DepthCoverage::accumulate(ID3D11DeviceContext* context,ID3D11Texture2D* wor
     if(!output_)throw std::runtime_error("Uninitialized coverage");output_->GetDesc(&out);
     ComPtr<ID3D11Device> actual;if(context)context->GetDevice(&actual);
     if(!context || context->GetType()!=D3D11_DEVICE_CONTEXT_IMMEDIATE || !same_device(actual.Get())
-        || a.Width!=b.Width || a.Height!=b.Height || a.Width!=out.Width || a.Height!=out.Height)
+        || (!cross_resource && (a.Width!=b.Width || a.Height!=b.Height))
+        || b.Width>a.Width || b.Height>a.Height || a.Width!=out.Width || a.Height!=out.Height)
         throw std::runtime_error("Coverage shape/context changed");
     auto bind=[&](ID3D11Texture2D* texture,ComPtr<ID3D11ShaderResourceView>& view){
         ComPtr<ID3D11Resource> prior;if(view)view->GetResource(&prior);

@@ -24,6 +24,14 @@ Connect to `127.0.0.1:37122`, send JSON Lines v1 `hello` with `role: test` or `c
 The binary connection cannot control the game. Both listeners bind only IPv4
 loopback. This is a local lab protocol, without authentication or encryption.
 
+The native receiver permits idle delivery while no byte of the next binary header
+has arrived and control heartbeats still confirm the world, epoch and stream.
+Once the first header bytes arrive, the entire packet has a strict two-second
+completion deadline; partial headers and payloads still fail. Old mailbox frames
+disappear after 500 ms even during healthy idle. Cancellation and control failures
+remain active while waiting. Socket fixtures verify a 2.3-second idle followed by
+successful delivery, stale-frame hiding, and partial-header timeout.
+
 ## Packet layout
 
 Packets are concatenated on TCP. Every field below is unsigned little-endian;

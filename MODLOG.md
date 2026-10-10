@@ -1078,3 +1078,56 @@ launch, in-game test, rendering bridge, or complete port has been performed.
   CS2; stricter coverage checks may reduce eligible frames. Added Chinese project
   status, code ownership and ordered acceptance plan. `liveOcclusionVerified`
   remains false; player/collision/chunk integration remains unimplemented.
+
+## Live reduced-depth coverage and healthy idle reception (2026-10-10)
+
+- Continued from pushed dbe666f. The owner exited ordinary CS2 and authorized
+  isolated offline verification. Used the installed universal-modder 0.2.0
+  game-automation workflow, fixed Steam offline guards and owned launcher;
+  no injection into the ordinary session and no edits to PCL/OptiFine saves.
+- Configured `game/start.ps1` now forwards explicit WorldFusion/calibration
+  arguments, validates file presence/size before guest launch, previews the mode
+  and preserves existing guest ownership. New fixtures cover forwarding to the
+  supervisor without stopping a reused guest, and early calibration failures.
+- Live10/11 confirmed strict unsupported-write checks rejected every eligible
+  submission. Added a fixed-value last unsupported draw descriptor. Measured
+  420x262, 840x525 and 420x525 depth resources/full-resource viewports at the
+  existing 1680x1050 output. Policy permits at most four exact local sizes,
+  only after the world latch; reduced textures cannot replace the camera/boundary.
+  Unknown sizes and partial reduced write viewports still reject the interval.
+- GPU coverage expands reduced source texels with integer proportional mapping.
+  Independently read-back tests verify retained footprints/clear/reset,
+  same-resource size rejection and an odd 5x3 output against a 2x2 source on
+  both axes, including staging row pitch. This remains conservative protection,
+  without a semantic proof of all host passes; calibration is private.
+- The native receiver now tolerates no-start-of-header idle while control
+  heartbeats verify the current world/epoch/stream. First header bytes start the
+  strict two-second packet deadline; partial headers/payloads still fail. The
+  existing 500ms mailbox age gate hides old frames. Socket tests independently
+  deliver another packet after 2.3s idle, check stale hiding/resumption, preserve
+  partial-header timeout and cancellation. No Java protocol/source change.
+- Final reports (not saved intermediate samples): live12 has 32,403 eligible,
+  42,716 GPU pairs, 2,860 matched cameras and 10 reconnects with one size allowed.
+  Live13 has 43,331 eligible, 46,565 boundaries, 45,227 GPU pairs, 3,861 matched
+  cameras, 4,183 received frames, 2 reconnects and 2,091 invalid intervals.
+  Last unsupported draw descriptor is null, last error is unsupported host pose,
+  event trace is truncated. Two sampled connection failures report the existing
+  64-block camera restriction; no idle receive deadline failure was sampled.
+  Different durations/scenes prevent a controlled performance comparison.
+- Full ReShade FX compilation succeeded during live10. Real callbacks and
+  supervised launch ran through live13. Actual Dust2 screenshots and a brief
+  minimized/restored window capture exist privately; the latter contains a menu.
+  Neither establishes visible guest pixels or front/behind-wall occlusion.
+  `liveOcclusionVerified` remains false; shared physics/chunks/players remain open.
+- All four owned CS2 sessions closed via verified exact-PID CloseMainWindow;
+  loader receipts Restored, owned guest receipts Closed, no restore failure.
+  Steam Build 25815307 remained unchanged. Pre/post hash comparison against the
+  current 105-file game/bin/win64 backup has no added/removed/changed files.
+  No CS2/Java game processes remain. Captures, policies, reports and saves ignored.
+- Final native rebuild/CTest 20/20 in 21.78s (socket suite contains 19 tests),
+  verified compiler header dependencies; bridge 41/41, loader/supervisor 33/33,
+  configured launcher 5/5, package guards 3/3. Guest startup ran its existing
+  build; no separate Java test acceptance claimed. Updated current status and
+  launcher/protocol docs. Next is a fixed-camera, known-block wall oracle, with
+  fixtures placed before the sole host connection starts, then remaining pose,
+  camera-distance, resize/menu and shared player/collision work.

@@ -1,5 +1,6 @@
 #Requires -Version 7.4
-param([string]$ConfigPath,[string]$SessionDirectory,[switch]$Launch)
+param([string]$ConfigPath,[string]$SessionDirectory,[switch]$Launch,
+    [switch]$WorldFusion,[string]$CameraLayout,[string]$FusionPolicy)
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path $PSScriptRoot -Parent
 . (Join-Path $PSScriptRoot 'guest-process.ps1')
@@ -9,6 +10,14 @@ foreach($key in @('Cs2Root','Gradle','JavaHome','BackupSnapshot','World')){
     if(-not $config.$key -or $config.$key -isnot [string]){throw "Missing string config field: $key"}
 }
 if($config.World -notmatch '^[A-Za-z0-9 _-]+$'){throw 'World name contains unsupported characters.'}
+if($WorldFusion){
+    foreach($calibration in @($CameraLayout,$FusionPolicy)){
+        if(-not $calibration -or -not (Test-Path -LiteralPath $calibration -PathType Leaf)){
+            throw 'Experimental WorldFusion requires CameraLayout and FusionPolicy files.'
+        }
+        if((Get-Item -LiteralPath $calibration).Length -gt 65536){throw 'Fusion calibration exceeds 64KiB.'}
+    }
+}elseif($CameraLayout -or $FusionPolicy){throw 'Calibration arguments require -WorldFusion.'}
 $javaExe=[IO.Path]::GetFullPath((Join-Path $config.JavaHome 'bin\java.exe'))
 if(-not $SessionDirectory){$SessionDirectory=Join-Path $projectRoot ('.local\sessions\'+[DateTime]::Now.ToString('yyyyMMdd-HHmmss')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8))}
 $SessionDirectory=[IO.Path]::GetFullPath($SessionDirectory)
@@ -19,6 +28,8 @@ if(-not $Launch){
     [pscustomobject]@{Mode='Preview';GameFilesWritten=$false;Cs2Root=$config.Cs2Root;World=$config.World
         Guest='Isolated minecraft/run client; reuse only a verified repository dev client'
         SessionDirectory=$SessionDirectory;ConfigPath=[IO.Path]::GetFullPath($ConfigPath)
+        WorldFusion=[bool]$WorldFusion
+        Rendering=if($WorldFusion){'Experimental static world fusion; no shared collision/gameplay'}else{'Full Minecraft client passthrough'}
         Exit='Close CS2; restore loader; close Minecraft only if this launch started it.'}
     return
 }
@@ -80,6 +91,7 @@ try {
     }
     $guestReceipt | ConvertTo-Json | Set-Content -LiteralPath $guestReceiptFile -Encoding utf8
     $playArgs=@{Mode='Play';Cs2Root=$config.Cs2Root;BackupSnapshot=$config.BackupSnapshot;SessionDirectory=$SessionDirectory}
+    if($WorldFusion){$playArgs.WorldFusion=$true;$playArgs.CameraLayout=[IO.Path]::GetFullPath($CameraLayout);$playArgs.FusionPolicy=[IO.Path]::GetFullPath($FusionPolicy)}
     foreach($key in @('Loader','NativeBuild','SteamExecutable')){
         if($config.$key){$playArgs[$key]=[string]$config.$key}
     }

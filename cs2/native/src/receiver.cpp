@@ -39,9 +39,12 @@ public:
     }
     ~Socket() { if (handle_ != INVALID_SOCKET) closesocket(handle_); }
     void wait(bool reading, int64_t deadline, const std::atomic<bool>& stop,
-              const std::function<void()>& keepalive = {}) {
+              const std::function<void()>& keepalive = {},bool idle_before_packet=false) {
         while (!stop.load()) {
-            if (monotonic_ns() >= deadline) throw std::runtime_error("Socket deadline exceeded");
+            if (monotonic_ns() >= deadline) {
+                if(idle_before_packet)return;
+                throw std::runtime_error("Socket deadline exceeded");
+            }
             if (keepalive) keepalive();
             fd_set wanted, errors; FD_ZERO(&wanted); FD_ZERO(&errors); FD_SET(handle_,&wanted); FD_SET(handle_,&errors);
             timeval timeout{0,20'000};
@@ -51,16 +54,22 @@ public:
         }
         throw std::runtime_error("Receiver stopped");
     }
-    void receive(std::span<uint8_t> target, int64_t deadline, const std::atomic<bool>& stop,
-                 const std::function<void()>& keepalive = {}) {
+    void receive(std::span<uint8_t> target, int64_t& deadline, const std::atomic<bool>& stop,
+                 const std::function<void()>& keepalive = {},bool idle_before_packet=false) {
+        const auto original=target.size();
         while (!target.empty()) {
             if (keepalive) keepalive();
+            // A healthy control/epoch heartbeat can outlive paused GPU delivery.
+            // Only an entirely absent header may wait; partial packets retain
+            // the strict two-second deadline and never reach the frame mailbox.
+            const bool idle=idle_before_packet && target.size()==original;
+            if(idle && monotonic_ns()>=deadline)deadline=monotonic_ns()+2'000'000'000;
             if (stop.load() || monotonic_ns() >= deadline) throw std::runtime_error("Receive stopped or timed out");
             int count = recv(handle_,reinterpret_cast<char*>(target.data()),int(target.size()),0);
             if (!count) throw std::runtime_error("Stream disconnected/partial packet");
-            if (count > 0) { target = target.subspan(size_t(count)); continue; }
+            if (count > 0) { if(idle)deadline=monotonic_ns()+2'000'000'000;target = target.subspan(size_t(count)); continue; }
             if (WSAGetLastError() != WSAEWOULDBLOCK) throw std::runtime_error("Socket read failed");
-            wait(true,deadline,stop,keepalive);
+            wait(true,deadline,stop,keepalive,idle);
         }
     }
     json request(json message, const std::atomic<bool>& stop) {
@@ -273,7 +282,7 @@ void Receiver::session() {
             std::array<uint8_t,64> header{};
             // Frame arrival must not delay the control heartbeat beyond its two-second lifetime.
             int64_t deadline = monotonic_ns() + 2'000'000'000;
-            binary.receive(header,deadline,stop_,heartbeat);
+            binary.receive(header,deadline,stop_,heartbeat,true);
             Header h = decode_header(header,session,sequence);
             std::vector<uint8_t> metadata(h.metadata_bytes);
             binary.receive(metadata,deadline,stop_,heartbeat);

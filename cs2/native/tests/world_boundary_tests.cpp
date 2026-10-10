@@ -40,6 +40,12 @@ int main(){try {
         extraPolicy["diagnosticView"]=bad;refused=false;
         try{FusionPolicy::parse(extraPolicy);}catch(const std::exception&){refused=true;}
         require(refused,"Invalid diagnostic mode accepted");}
+    extraPolicy.erase("diagnosticView");extraPolicy["additionalCoverageDepthSizes"]={{40,25},{80,50}};
+    require(FusionPolicy::parse(extraPolicy).coverage_sizes.size()==2,"Measured coverage sizes not parsed");
+    for(const auto& bad:std::vector<nlohmann::json>{nullptr,{{0,25}},{{-1,25}},{{40.5,25}},{{true,25}},{{4097,25}},{{40}},{{40,25},{40,25},{40,25},{40,25},{40,25}}}){
+        extraPolicy["additionalCoverageDepthSizes"]=bad;refused=false;
+        try{FusionPolicy::parse(extraPolicy);}catch(const std::exception&){refused=true;}
+        require(refused,"Invalid coverage dimensions accepted");}
     b.reset();b.arm(11,8,world);require(!b.observe(12,front,policy) && !b.ready(),"Different resource paired");
     b.reset();b.arm(11,9,world);b.clear_resource(11);require(!b.observe(11,front,policy),"Clear reused camera");
     b.reset();b.arm(11,10,world);auto resize=front;resize[2]=320;

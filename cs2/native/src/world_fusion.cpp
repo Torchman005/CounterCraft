@@ -15,13 +15,16 @@ namespace cc {
 namespace api=reshade::api;
 using Microsoft::WRL::ComPtr;
 struct WorldFusion::Impl {
-    struct Candidate {uint64_t draws{};bool cleared{};uint32_t id{};};
+    struct UnsupportedDepth {std::array<uint32_t,6> shape{},color_shape{};std::array<double,6> viewport{};uint32_t color_count{},viewport_count{};};
+    struct Candidate {uint64_t draws{};bool cleared{};uint32_t id{},width{},height{};};
     struct Transition {std::array<double,6> viewport{};uint32_t rejection{};bool latched{};
         uint32_t resource{},color{},samples{},event{},source{},destination{};bool backbuffer{},writes_depth{};};
     struct Device {
         uint32_t width{},height{};
         uint64_t bound{},current_sequence{};
         uint64_t color{},backbuffer{};
+        uint64_t unsupported_resource{};
+        uint32_t color_count{};
         uint32_t next_resource_id{},next_color_id{};
         std::unordered_map<uint64_t,uint32_t> colors;
         bool effects{},available{},unsupported_depth{};
@@ -57,6 +60,7 @@ struct WorldFusion::Impl {
     size_t last_transition_count{};
     bool last_trace_truncated{};
     std::optional<HostCamera> last_camera;
+    std::optional<UnsupportedDepth> last_unsupported;
     Impl(bool e,const std::filesystem::path& base,Receiver& r):enabled(e),receiver(r) {
         if(!enabled)return;
         auto read=[&](const char* name){auto path=base/name;
@@ -73,10 +77,14 @@ ID3D11DeviceContext* immediate(api::command_list* cmd) {
     auto* c=reinterpret_cast<ID3D11DeviceContext*>(cmd->get_native());
     return c && c->GetType()==D3D11_DEVICE_CONTEXT_IMMEDIATE?c:nullptr;
 }
-bool eligible(api::device* device,api::resource resource,const WorldFusion::Impl::Device& d) {
+bool eligible(api::device* device,api::resource resource,const WorldFusion::Impl::Device& d,bool coverage=false) {
     if(!resource.handle || !d.width || !d.height)return false;
     const auto desc=device->get_resource_desc(resource);
-    return desc.type==api::resource_type::texture_2d && desc.texture.width==d.width && desc.texture.height==d.height
+    bool size=desc.texture.width==d.width && desc.texture.height==d.height;
+    if(coverage && desc.texture.width<=d.width && desc.texture.height<=d.height)
+        for(const auto& calibrated:fusion->policy.coverage_sizes)
+            size=size || (desc.texture.width==calibrated[0] && desc.texture.height==calibrated[1]);
+    return desc.type==api::resource_type::texture_2d && size
         && uint64_t(d.width)*d.height<=max_pixels && desc.texture.depth_or_layers==1 && desc.texture.levels==1
         && desc.texture.samples<=8 && (desc.usage & api::resource_usage::depth_stencil)!=api::resource_usage::undefined;
 }
@@ -113,15 +121,16 @@ void bind_depth(api::command_list* cmd,uint32_t count,const api::resource_view* 
         auto* device=cmd->get_device();auto& d=fusion->devices[device];
         const auto next=view.handle?device->get_resource_from_view(view):api::resource{};
         if(d.bound && next.handle!=d.bound)capture_resource(d,immediate(cmd),d.bound);
-        d.bound=0;d.color=0;d.unsupported_depth=false;
+        d.bound=0;d.color=0;d.unsupported_depth=false;d.unsupported_resource=0;d.color_count=count;
         if(count && colors && colors[0].handle){d.color=device->get_resource_from_view(colors[0]).handle;
             if(d.colors.size()<128 && !d.colors.contains(d.color))d.colors[d.color]=++d.next_color_id;}
         if(d.effects)return;
         if(!view.handle){trace(d,1);return;}
         const auto resource=device->get_resource_from_view(view);
-        if(!eligible(device,resource,d)){d.unsupported_depth=true;trace(d,1);return;}
+        if(!eligible(device,resource,d,d.boundary.ready())){d.unsupported_depth=true;d.unsupported_resource=resource.handle;trace(d,1);return;}
         if(!d.candidates.contains(resource.handle) && d.candidates.size()>=16){d.boundary.invalid=true;throw std::runtime_error("Too many depth resources");}
         auto [it,inserted]=d.candidates.try_emplace(resource.handle);if(inserted)it->second.id=++d.next_resource_id;
+        const auto shape=device->get_resource_desc(resource);it->second.width=shape.texture.width;it->second.height=shape.texture.height;
         d.bound=resource.handle;trace(d,1);
     }catch(const std::exception& e){auto& d=fusion->devices[cmd->get_device()];d.boundary.invalid=true;++fusion->invalid;fusion->error=std::string(e.what()).substr(0,160);}
 }
@@ -132,12 +141,13 @@ bool clear_depth(api::command_list* cmd,api::resource_view view,const float* dep
         auto* device=cmd->get_device();auto& d=fusion->devices[device];
         if(d.effects)return false;
         const auto resource=device->get_resource_from_view(view);
-        if(!eligible(device,resource,d)){
+        if(!eligible(device,resource,d,d.boundary.ready())){
             if(d.boundary.ready())reject_coverage(d,"Unsupported post-world depth clear");
             return false;
         }
         if(!d.candidates.contains(resource.handle) && d.candidates.size()>=16){d.boundary.invalid=true;throw std::runtime_error("Too many depth resources");}
         auto [it,inserted]=d.candidates.try_emplace(resource.handle);if(inserted)it->second.id=++d.next_resource_id;
+        const auto shape=device->get_resource_desc(resource);it->second.width=shape.texture.width;it->second.height=shape.texture.height;
         const bool known_clear=count==0 && *depth==fusion->policy.clear;
         if(d.boundary.ready() && !known_clear){d.boundary.invalid=true;d.boundary.rejection=3;}
         trace(d,known_clear?3:4,{},d.candidates.contains(resource.handle)?d.candidates.at(resource.handle).id:0);
@@ -196,9 +206,27 @@ bool draw(api::command_list* cmd,uint32_t,uint32_t,uint32_t,uint32_t) {
         D3D11_DEPTH_STENCIL_DESC description{};
         if(state)state->GetDesc(&description);else {description.DepthEnable=TRUE;description.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL;}
         const bool writes=description.DepthEnable && description.DepthWriteMask==D3D11_DEPTH_WRITE_MASK_ALL;
-        if(writes && d.unsupported_depth && d.boundary.ready())reject_coverage(d,"Unsupported post-world depth write");
         if(writes && d.bound && d.boundary.ready())d.journal.write(d.bound);
         UINT count=16;std::array<D3D11_VIEWPORT,16> v{};context->RSGetViewports(&count,v.data());
+        if(writes && d.unsupported_depth && d.boundary.ready()){
+            WorldFusion::Impl::UnsupportedDepth detail;
+            auto shape=[](const api::resource_desc& desc){return std::array<uint32_t,6>{uint32_t(desc.type),desc.texture.width,desc.texture.height,desc.texture.depth_or_layers,desc.texture.levels,desc.texture.samples};};
+            detail.shape=shape(cmd->get_device()->get_resource_desc(api::resource{d.unsupported_resource}));
+            if(d.color)detail.color_shape=shape(cmd->get_device()->get_resource_desc(api::resource{d.color}));
+            detail.color_count=d.color_count;detail.viewport_count=count;
+            if(count)detail.viewport={v[0].TopLeftX,v[0].TopLeftY,v[0].Width,v[0].Height,v[0].MinDepth,v[0].MaxDepth};
+            fusion->last_unsupported=detail;
+            reject_coverage(d,"Unsupported post-world depth write");
+        }
+        if(d.bound && d.boundary.ready()){
+            const auto& candidate=d.candidates.at(d.bound);
+            if(candidate.width!=d.width || candidate.height!=d.height){
+                if(writes && (count!=1 || v[0].TopLeftX!=0 || v[0].TopLeftY!=0 || v[0].Width!=float(candidate.width) || v[0].Height!=float(candidate.height)))
+                    reject_coverage(d,"Calibrated coverage depth viewport changed");
+                if(count==1)trace(d,2,{v[0].TopLeftX,v[0].TopLeftY,v[0].Width,v[0].Height,v[0].MinDepth,v[0].MaxDepth},0,0,writes);
+                return false; // A reduced depth pass cannot replace the world camera/boundary.
+            }
+        }
         if(count!=1 || v[0].TopLeftX!=0 || v[0].TopLeftY!=0 || v[0].Width!=float(d.width) || v[0].Height!=float(d.height)) {
             // Post-world coverage includes writes from smaller viewports too.
             if(writes && d.bound && d.boundary.armed && !d.boundary.latched){d.boundary.invalid=true;d.boundary.rejection=4;}return false;
@@ -248,11 +276,12 @@ bool copy_depth(api::command_list* cmd,api::resource source,api::resource destin
         const auto desc=destination.handle?device->get_resource_desc(destination):api::resource_desc{};
         const bool depth=(desc.usage & api::resource_usage::depth_stencil)!=api::resource_usage::undefined;
         if(d.boundary.ready() && depth){
-            if(!eligible(device,destination,d))reject_coverage(d,"Unsupported post-world depth copy");
+            if(!eligible(device,destination,d,true))reject_coverage(d,"Unsupported post-world depth copy");
             if(!d.candidates.contains(destination.handle) && d.candidates.size()>=16)
                 reject_coverage(d,"Too many depth copy destinations");
             auto [it,inserted]=d.candidates.try_emplace(destination.handle);
             if(inserted)it->second.id=++d.next_resource_id;
+            it->second.width=desc.texture.width;it->second.height=desc.texture.height;
             d.journal.copy(destination.handle,[&](uint64_t handle,bool){
                 capture_coverage(d,context,reinterpret_cast<ID3D11Texture2D*>(handle),fusion->policy.clear);
             });
@@ -364,7 +393,7 @@ void WorldFusion::begin(api::effect_runtime* runtime,api::command_list* cmd) {
         if(d.current_sequence)d.pending[d.current_sequence]=false;
         impl_->last_rejection=d.boundary.rejection;++impl_->invalid;impl_->error=std::string(e.what()).substr(0,160);
     }
-    d.boundary.reset();d.bound=0;d.current_sequence=0;d.late_clear=false;d.journal.reset();d.unsupported_depth=false;
+    d.boundary.reset();d.bound=0;d.current_sequence=0;d.late_clear=false;d.journal.reset();d.unsupported_depth=false;d.unsupported_resource=0;
     d.transition_count=0;d.trace_truncated=false;d.last_draw={};d.last_bind={};
     for(auto& [_,candidate]:d.candidates){candidate.draws=0;candidate.cleared=false;}
     d.backbuffer=runtime->get_current_back_buffer().handle;
@@ -432,6 +461,7 @@ nlohmann::json WorldFusion::report()const {
         {"poseMismatchFrames",impl_->unaligned.load()},{"notReadyFrames",impl_->not_ready.load()},{"invalid",impl_->invalid.load()},
         {"lastError",impl_->error},{"lastBoundaryRejection",impl_->last_rejection},
         {"lastDecodedCamera",impl_->last_camera?impl_->last_camera->report():nlohmann::json(nullptr)},
+        {"lastUnsupportedDepth",impl_->last_unsupported?nlohmann::json{{"shape",impl_->last_unsupported->shape},{"colorShape",impl_->last_unsupported->color_shape},{"colorCount",impl_->last_unsupported->color_count},{"viewportCount",impl_->last_unsupported->viewport_count},{"viewport",impl_->last_unsupported->viewport}}:nlohmann::json(nullptr)},
         {"lastViewportTransitions",transitions},{"traceTruncated",impl_->last_trace_truncated},{"liveOcclusionVerified",false}};
 }
 }

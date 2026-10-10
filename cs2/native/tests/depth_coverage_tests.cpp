@@ -99,6 +99,42 @@ int main(){try {
     context->UpdateSubresource(second.Get(),0,nullptr,pixels.data(),sizeof(pixels),0);
     journal.capture(1,capture,true);journal.flush(capture);verify({1,1,1,0});
     journal.reset();coverage.reset(context.Get(),world.Get());verify({0,0,0,0});
+    auto small_desc=desc;small_desc.Width=2;
+    std::array<std::array<float,2>,2> small_pixels{{{.75f,.75f},{.04f,.04f}}};
+    D3D11_SUBRESOURCE_DATA small_initial{small_pixels.data(),sizeof(small_pixels),0};
+    ComPtr<ID3D11Texture2D> smaller;check(device->CreateTexture2D(&small_desc,&small_initial,&smaller),"Reduced coverage resource");
+    coverage.accumulate(context.Get(),world.Get(),smaller.Get(),false,1,true);verify({0,0,1,1});
+    small_pixels.fill({1,1});context->UpdateSubresource(smaller.Get(),0,nullptr,small_pixels.data(),sizeof(small_pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),smaller.Get(),true,1,true);verify({0,0,1,1});
+    coverage.reset(context.Get(),world.Get());small_pixels[0]={.03f,.04f};
+    context->UpdateSubresource(smaller.Get(),0,nullptr,small_pixels.data(),sizeof(small_pixels),0);
+    coverage.accumulate(context.Get(),world.Get(),smaller.Get(),true,1,true);verify({1,1,0,0});
+    bool shape_refused=false;
+    try{coverage.accumulate(context.Get(),world.Get(),smaller.Get(),false,1);}catch(const std::exception&){shape_refused=true;}
+    require(shape_refused,"Same-resource coverage accepted a reduced shape");
+    // Odd dimensions exercise both axes and the non-integral edge footprints
+    // observed in live reduced-resolution passes. Read back pitched rows.
+    {
+        auto wide_desc=desc;wide_desc.Width=5;wide_desc.Height=3;
+        std::array<std::array<float,2>,15> wide_pixels;wide_pixels.fill({.75f,.75f});
+        D3D11_SUBRESOURCE_DATA wide_initial{wide_pixels.data(),5*sizeof(wide_pixels[0]),0};
+        ComPtr<ID3D11Texture2D> wide;check(device->CreateTexture2D(&wide_desc,&wide_initial,&wide),"Odd coverage world");
+        auto grid_desc=desc;grid_desc.Width=grid_desc.Height=2;
+        std::array<std::array<float,2>,4> grid_pixels{{{.75f,.75f},{.03f,.03f},{.04f,.04f},{.75f,.75f}}};
+        D3D11_SUBRESOURCE_DATA grid_initial{grid_pixels.data(),2*sizeof(grid_pixels[0]),0};
+        ComPtr<ID3D11Texture2D> grid;check(device->CreateTexture2D(&grid_desc,&grid_initial,&grid),"Reduced coverage grid");
+        DepthCoverage odd(device.Get());odd.reset(context.Get(),wide.Get());
+        odd.accumulate(context.Get(),wide.Get(),grid.Get(),false,1,true);
+        wide_desc.Format=DXGI_FORMAT_R32_FLOAT;wide_desc.BindFlags=0;
+        wide_desc.Usage=D3D11_USAGE_STAGING;wide_desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+        ComPtr<ID3D11Texture2D> staging;check(device->CreateTexture2D(&wide_desc,nullptr,&staging),"Odd coverage staging");
+        context->CopyResource(staging.Get(),odd.output());D3D11_MAPPED_SUBRESOURCE mapped{};
+        check(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped),"Odd coverage map");
+        std::array<float,15> actual{};
+        for(size_t row=0;row<3;++row)std::memcpy(actual.data()+row*5,static_cast<const uint8_t*>(mapped.pData)+row*mapped.RowPitch,5*sizeof(float));
+        context->Unmap(staging.Get(),0);
+        require(actual==std::array<float,15>{0,0,0,1,1,0,0,0,1,1,1,1,1,0,0},"Odd two-axis coverage footprint lost an occluder");
+    }
     bool refused=false;try{coverage.accumulate(context.Get(),world.Get(),sentinel.texture.Get(),false,1);}catch(const std::exception&){refused=true;}
     require(refused,"Coverage accepted invalid format");
     ComPtr<ID3D11Device> foreign_device;ComPtr<ID3D11DeviceContext> foreign_context;

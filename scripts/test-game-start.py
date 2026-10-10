@@ -84,5 +84,46 @@ Require (-not (Test-RepositoryGuest 10 'C:\Java\bin\java.exe' 'C:\CounterCraft')
             self.assertFalse(receipt["Owned"]); self.assertEqual(receipt["ProcessId"], 0)
             self.assertFalse((root / "session/loader-state.json").exists())
 
+    def test_fusion_requires_calibration_before_launch(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name); config = self.fixture(root)
+            result = self.run_script(root, "function Start-Process {throw 'Unexpected launch'}\n& "
+                + quote(root / "game/start.ps1") + " -Launch -WorldFusion -ConfigPath " + quote(config)
+                + " -SessionDirectory " + quote(root / "session"))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("requires CameraLayout and FusionPolicy", result.stderr)
+            self.assertFalse((root / "session").exists())
+
+    def test_fusion_preview_and_forwarding_preserve_guest_ownership(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name); config = self.fixture(root)
+            layout, policy = root / "camera.json", root / "policy.json"
+            layout.write_text("{}"); policy.write_text("{}")
+            args = " -WorldFusion -CameraLayout " + quote(layout) + " -FusionPolicy " + quote(policy)
+            args += " -ConfigPath " + quote(config) + " -SessionDirectory " + quote(root / "session")
+            result = self.run_script(root, "& " + quote(root / "game/start.ps1") + args + " | ConvertTo-Json")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(json.loads(result.stdout)["WorldFusion"])
+            self.assertFalse((root / "session").exists())
+            (root / "game/play.ps1").write_text(
+                "param($Mode,$Cs2Root,$BackupSnapshot,$SessionDirectory,[switch]$WorldFusion,$CameraLayout,$FusionPolicy)\n"
+                "$PSBoundParameters | ConvertTo-Json\n", encoding="utf8")
+            line = '-Dcountercraft.enabled=true -cp ' + str(root / "minecraft/client.jar") + ' net.fabricmc.devlaunchinjector.Main'
+            text = ("$ErrorActionPreference='Stop'\n"
+                "function Get-Process {param($Name,$Id,$ErrorAction)}\n"
+                "function Get-NetTCPConnection {param($LocalPort,$State,$ErrorAction); [pscustomobject]@{OwningProcess=999}}\n"
+                "function Get-CimInstance {param($ClassName,$Filter); [pscustomobject]@{ExecutablePath="
+                + quote(root / "java/bin/java.exe") + ";CommandLine=" + quote(line) + "}}\n"
+                "function Start-Process {throw 'Unexpected launch'}\nfunction Stop-Process {throw 'Unexpected stop'}\n"
+                "& " + quote(root / "game/start.ps1") + " -Launch" + args)
+            result = self.run_script(root, text)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            forwarded = json.loads(result.stdout)
+            self.assertTrue(forwarded["WorldFusion"])
+            self.assertEqual(Path(forwarded["CameraLayout"]), layout)
+            self.assertEqual(Path(forwarded["FusionPolicy"]), policy)
+            receipt = json.loads((root / "session/guest.json").read_text(encoding="utf-8-sig"))
+            self.assertFalse(receipt["Owned"]); self.assertEqual(receipt["Mode"], "Reused")
+
 
 if __name__ == "__main__": unittest.main()

@@ -12,6 +12,7 @@ struct FusionPolicy {
     float clear{};
     uint32_t camera_draw{64};
     std::vector<std::array<float,2>> additional_boundaries;
+    std::vector<std::array<uint32_t,2>> coverage_sizes;
     uint32_t diagnostic_view{};
     static FusionPolicy parse(const nlohmann::json& j) {
         if(j.at("schema")!=1 || j.at("kind")!="local-world-boundary")
@@ -36,6 +37,17 @@ struct FusionPolicy {
             if(!value.is_number_unsigned() && !value.is_number_integer())throw std::runtime_error("Invalid fusion diagnostic view");
             if(value.get<double>()<0 || value.get<double>()>3)throw std::runtime_error("Invalid fusion diagnostic view");
             p.diagnostic_view=value.get<uint32_t>();
+        }
+        if(j.contains("additionalCoverageDepthSizes")){
+            const auto& sizes=j.at("additionalCoverageDepthSizes");
+            if(!sizes.is_array() || sizes.size()>4)throw std::runtime_error("Invalid coverage depth sizes");
+            for(const auto& size:sizes){
+                if(!size.is_array() || size.size()!=2)throw std::runtime_error("Invalid coverage depth size");
+                for(const auto& value:size)
+                    if((!value.is_number_integer() && !value.is_number_unsigned()) || value.get<double>()<1 || value.get<double>()>4096)
+                        throw std::runtime_error("Invalid coverage depth dimension");
+                p.coverage_sizes.push_back(size.get<std::array<uint32_t,2>>());
+            }
         }
         return p;
     }
